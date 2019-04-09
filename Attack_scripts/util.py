@@ -35,7 +35,7 @@ def loadChexNetModel(model_path):
 	return model.eval().to(device)
 
 
-def imgPreProc(img_path):
+def singleImgPreProc(img_path):
 
 	ori_img = cv2.imread(img_path)
 	ori_img = cv2.resize(ori_img, (224, 224))
