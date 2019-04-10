@@ -10,6 +10,7 @@ from torchvision import transforms
 from torch.autograd import Variable
 
 
+
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 mean = [0.485, 0.456, 0.406]
@@ -98,3 +99,4 @@ def plotFigures(oriImg, preds, ori_score, advImg, f_preds, f_score, x_grad, epsi
 	ax[2].text(0.5,-0.13, "Prediction: {}\n Probability: {:.4f}".format(BI_ClASS_NAMES[f_preds], np.max(f_score)), size=15, ha="center", transform=ax[2].transAxes)
 
 	plt.show()
+
