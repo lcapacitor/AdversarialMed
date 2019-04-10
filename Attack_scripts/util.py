@@ -45,27 +45,28 @@ def singleImgPreProc(img_path):
 	img = (img - mean)/std
 	img = img.transpose(2, 0, 1)
 
-	img_ts = Variable(torch.from_numpy(img).type(torch.float).unsqueeze(0), requires_grad=True).to(device)
-
+	# img_ts = Variable(torch.from_numpy(img).type(torch.float).unsqueeze(0), requires_grad=True).to(device)
+	img_ts = Variable(torch.from_numpy(img).type(torch.float).unsqueeze(0)).to(device)
+	img_ts.requires_grad = True
 	return ori_img, img, img_ts
 
 
 def plotFigures(oriImg, preds, ori_score, advImg, f_preds, f_score, x_grad, epsilon):
 
 	# Get original image
-	x = oriImg.squeeze(0)
+	x = oriImg.squeeze(0).data.cpu()
 	x = x.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
 	x = np.transpose(x, (1,2,0))   # C X H X W  ==>   H X W X C
 	x = np.clip(x, 0, 1)
 
     	# Get adversarail image
-	x_adv = advImg.squeeze(0)
+	x_adv = advImg.squeeze(0).data.cpu()
 	x_adv = x_adv.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
 	x_adv = np.transpose(x_adv, (1,2,0))   # C X H X W  ==>   H X W X C
 	x_adv = np.clip(x_adv, 0, 1)
 
 	# Get perturbation image
-	x_grad = x_grad.squeeze(0).numpy()
+	x_grad = x_grad.squeeze(0).data.cpu().numpy()
 	x_grad = np.transpose(x_grad, (1, 2, 0))
 	x_grad = np.clip(x_grad, 0, 1)
 

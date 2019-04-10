@@ -42,7 +42,7 @@ def attackBasicIterMethod(data_mode, epsilon, num_iters, alpha):
 		print ('Actual prediction: {}, probs: {}, GT label: {}'.format(BI_ClASS_NAMES[preds], scores, BI_ClASS_NAMES[label]))
 
 		x_adv = img_ts
-		ori_img_ts = torch.from_numpy(img).type(torch.float).unsqueeze(0)
+		ori_img_ts = torch.from_numpy(img).type(torch.float).unsqueeze(0).to(device)
 
 		# Loop over each iteration
 		for i in range(num_iters):
@@ -54,7 +54,7 @@ def attackBasicIterMethod(data_mode, epsilon, num_iters, alpha):
 
 			x_grad  = alpha * torch.sign(x_adv.grad.data)
 
-			perturbation = (x_adv.data + x_grad) - ori_img_ts
+			perturbation = (x_adv.data + x_grad) - ori_img_ts.data
 			perturbation = torch.clamp(perturbation, -epsilon, epsilon)
 
 			x_adv.data = ori_img_ts + perturbation

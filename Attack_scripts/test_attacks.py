@@ -44,9 +44,9 @@ def testPerformance(epsilon, data_path):
 	pred_probs_adv = []
 
 	for inputs, labels in tqdm(dataloader):
-		inputs = Variable(inputs, requires_grad=True)
+		inputs = Variable(inputs, requires_grad=True).to(device)
 
-		outputs = CheXnet_model(inputs)
+		outputs = CheXnet_model(inputs).data.cpu()
 		_, preds = torch.max(outputs, 1)
 		pred_probs += outputs[:, 1].tolist()
 		gt_labels += labels.tolist()
