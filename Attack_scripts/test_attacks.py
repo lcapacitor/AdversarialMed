@@ -58,7 +58,7 @@ def testPerformance(epsilon, data_path, model_type):
 
 		loss = loss_fn(outputs, labels)
 		loss.backward()
-		
+
 		# FGSM get adversarial
 		x_grad = torch.sign(inputs.grad.data)
 
@@ -105,4 +105,3 @@ if __name__ == '__main__':
 	parser.add_argument('--model', type=str, default='pneu', help='specify which model will be tested: pneu or chex, default is pneu')
 	args = parser.parse_args()
 	main(args)
-
