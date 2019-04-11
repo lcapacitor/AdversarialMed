@@ -8,9 +8,9 @@ from torch.autograd import Variable
 from util import *
 
 
-CKPT_PATH = 'pneu_model/pneu_model.ckpt'
-IMG_PATH_NORM = './img/normal/'
-IMG_PATH_PNEU = './img/pneumonia/'
+CKPT_PATH = 'models/pneu_model.ckpt'
+IMG_PATH_NORM = './img/0/'
+IMG_PATH_PNEU = './img/1/'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -21,7 +21,7 @@ def attackWithFGSM(epsilon, data_mode):
 	loss_fn = nn.CrossEntropyLoss().to(device)
 
 	# Load chexnet model
-	CheXnet_model = loadChexNetModel(CKPT_PATH)
+	CheXnet_model = loadPneuModel(CKPT_PATH)
 
 	fileFolder = IMG_PATH_NORM if data_mode==0 else IMG_PATH_PNEU
 	files = os.listdir(fileFolder)
@@ -44,9 +44,9 @@ def attackWithFGSM(epsilon, data_mode):
 		loss.backward()
 
 		# FGSM get adversarial
-		x_grad = torch.sign(img_ts.grad.data)
+		x_grad = torch.sign(img_ts.cpu().grad.data)
 		perturbation = epsilon * x_grad
-		adv_img = img_ts.data + perturbation
+		adv_img = img_ts.cpu().data + perturbation
 
 		# Predict with adversarial
 		f_ouput = CheXnet_model(adv_img)
