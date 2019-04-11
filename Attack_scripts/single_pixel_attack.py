@@ -31,13 +31,17 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 parser = argparse.ArgumentParser(description='One pixel attack with PyTorch')
-parser.add_argument('--dtype', type=int, default=0, help='type of data to test with, 0 (default): Normal data, 1: Pneumonia data')
-parser.add_argument('--pixels', default=1, type=int, help='The number of pixels that can be perturbed.')
+parser.add_argument('--pixels', default=20, type=int, help='The number of pixels that can be perturbed.')
+# parser.add_argument('--maxiter', default=100, type=int, help='The maximum number of iteration in the DE algorithm.')
 parser.add_argument('--maxiter', default=100, type=int, help='The maximum number of iteration in the DE algorithm.')
 parser.add_argument('--popsize', default=400, type=int, help='The number of adverisal examples in each iteration.')
+# parser.add_argument('--popsize', default=16, type=int, help='The number of adverisal examples in each iteration.')
 parser.add_argument('--samples', default=100, type=int, help='The number of image samples to attack.')
+# parser.add_argument('--samples', default=4, type=int, help='The number of image samples to attack.')
 parser.add_argument('--targeted', action='store_true', help='Set this switch to test for targeted attacks.')
 parser.add_argument('--verbose', action='store_true', help='Print out additional information every iteration.')
+
+#args = parser.parse_args("--verbose --targeted")
 
 args = parser.parse_args()
 
@@ -71,17 +75,16 @@ def predict_classes(xs, img, target_calss, net, minimize=True):
     return predictions if minimize else 1 - predictions
 
 
-def attack_success(x, img, target_calss, net, targeted_attack=False, verbose=False):
+def attack_success(x, img, target_class, net, targeted_attack=False, verbose=False):
     attack_image = perturb_image(x, img.clone())
     input = Variable(attack_image).to(device)
     confidence = F.softmax(net(input)).data.cpu().numpy()[0]
     predicted_class = np.argmax(confidence)
 
     if (verbose):
-        print
-        "Confidence: %.4f" % confidence[target_calss]
-    if (targeted_attack and predicted_class == target_calss) or (
-            not targeted_attack and predicted_class != target_calss):
+        print("Confidence: %.4f" % confidence[target_class])
+    if (targeted_attack and predicted_class == target_class) or (
+            not targeted_attack and predicted_class != target_class):
         return True
 
 
@@ -92,7 +95,7 @@ def attack(img, label, net, target=None, pixels=1, maxiter=75, popsize=400, verb
     targeted_attack = target is not None
     target_class = target if targeted_attack else label
 
-    bounds = [(0, 32), (0, 32), (0, 255), (0, 255), (0, 255)] * pixels
+    bounds = [(0, 224), (0, 224), (0, 255), (0, 255), (0, 255)] * pixels
 
     popmul = max(1, popsize / len(bounds))
 
@@ -104,14 +107,14 @@ def attack(img, label, net, target=None, pixels=1, maxiter=75, popsize=400, verb
     inits = np.zeros([int(popmul * len(bounds)), len(bounds)])
     for init in inits:
         for i in range(pixels):
-            init[i * 5 + 0] = np.random.random() * 32
-            init[i * 5 + 1] = np.random.random() * 32
+            init[i * 5 + 0] = np.random.random() * 224
+            init[i * 5 + 1] = np.random.random() * 224
             init[i * 5 + 2] = np.random.normal(128, 127)
             init[i * 5 + 3] = np.random.normal(128, 127)
             init[i * 5 + 4] = np.random.normal(128, 127)
 
-    attack_result = differential_evolution(predict_fn, bounds, maxiter=maxiter, popsize=popmul,
-                                           recombination=1, atol=-1, callback=callback_fn, polish=False, init=inits)
+    attack_result = differential_evolution(predict_fn, bounds, maxiter=maxiter, popsize=popmul, mutation=(0.5, 1),
+                                           recombination=0.7, atol=-1, callback=callback_fn, polish=True, init=inits)
 
     attack_image = perturb_image(attack_result.x, img)
     attack_var = Variable(attack_image).to(device)
@@ -159,9 +162,7 @@ def attack_all(net, loader, pixels=1, targeted=False, maxiter=75, popsize=400, v
                 success_rate = float(success) / correct
 
             if flag == 1:
-                print
-                "success rate: %.4f (%d/%d) [(x,y) = (%d,%d) and (R,G,B)=(%d,%d,%d)]" % (
-                    success_rate, success, correct, x[0], x[1], x[2], x[3], x[4])
+                print("success rate: %.4f (%d/%d) [(x,y) = (%d,%d) and (R,G,B)=(%d,%d,%d)]" % (success_rate, success, correct, x[0], x[1], x[2], x[3], x[4]))
 
         if correct == args.samples:
             break
@@ -170,17 +171,13 @@ def attack_all(net, loader, pixels=1, targeted=False, maxiter=75, popsize=400, v
 
 
 def main():
-    print
-    "==> Loading data and model..."
+    print("==> Loading data and model...")
 
-    data_type = args.dtype
 
     CheXnet_model = loadChexNetModel(CKPT_PATH)
 
     fileFolder = IMG_PATH
 
-    label = data_type
-    label_var = Variable(torch.Tensor([float(label)]).long(), requires_grad=False).to(device)
 
     data_transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -191,13 +188,11 @@ def main():
     image_dataset = datasets.ImageFolder(fileFolder, data_transform)
     dataloader = torch.utils.data.DataLoader(image_dataset, batch_size=1, shuffle=False, num_workers=0)
 
-    print
-    "==> Starting attck..."
+    print("==> Starting attck...")
 
     results = attack_all(CheXnet_model, dataloader, pixels=args.pixels, targeted=args.targeted, maxiter=args.maxiter,
                          popsize=args.popsize, verbose=args.verbose)
-    print
-    "Final success rate: %.4f" % results
+    print("Final success rate: %.4f" % results)
 
 
 if __name__ == '__main__':
