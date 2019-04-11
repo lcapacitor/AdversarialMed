@@ -1,4 +1,5 @@
 import os
+import re
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,7 +17,7 @@ mean = [0.485, 0.456, 0.406]
 std  = [0.229, 0.224, 0.225]
 
 
-def loadChexNetModel(model_path):
+def loadPneuModel(model_path):
 	out_size = 2
 	model = torchvision.models.densenet121(pretrained=True)
 	num_ftrs = model.classifier.in_features
@@ -35,6 +36,47 @@ def loadChexNetModel(model_path):
 	return model.eval().to(device)
 
 
+def loadChexnet14(checkpoint_path):
+    '''
+    Load the trained ChexNet with the given checkpoint directory
+    Input:
+        checkpoint_path:    (str) the directory to the trained ChexNet model
+    Return:
+        the loaded ChexNet model
+    '''
+    # construct ChexNet structure
+    out_size =14
+    model = torchvision.models.densenet121(pretrained=True)
+    num_ftrs = model.classifier.in_features
+    model.classifier = nn.Sequential(
+        nn.Linear(num_ftrs, out_size),
+        nn.Softmax(1)
+    )
+    # change the names in Densenet old version
+    pattern = re.compile(r'^(.*denselayer\d+\.(?:norm|relu|conv))\.((?:[12])\.(?:weight|bias|running_mean|running_var))$')
+    # load checkpoint
+    if torch.cuda.is_available():
+        modelCheckpoint = torch.load(checkpoint_path)
+    else:
+        modelCheckpoint = torch.load(checkpoint_path, map_location='cpu')
+    # load weights from the loaded checkpoint
+    state_dict = modelCheckpoint['state_dict']
+    # replacement from the old version
+    for key in list(state_dict.keys()):
+        old_key = key
+        key = key.replace('module.densenet121.', '')
+        res = pattern.match(key)
+        if res:
+            new_key = res.group(1) + res.group(2)
+        else:
+            new_key = key
+        state_dict[new_key] = state_dict[old_key]
+        del state_dict[old_key]
+
+    model.load_state_dict(state_dict)
+    return model.eval().to(device)
+
+
 def singleImgPreProc(img_path):
 
 	ori_img = cv2.imread(img_path)
@@ -45,7 +87,8 @@ def singleImgPreProc(img_path):
 	img = (img - mean)/std
 	img = img.transpose(2, 0, 1)
 
-	img_ts = Variable(torch.from_numpy(img).type(torch.float).unsqueeze(0), requires_grad=True).to(device)
+	img_ts = Variable(torch.from_numpy(img).type(torch.float).unsqueeze(0)).to(device)
+	img_ts.requires_grad = True
 
 	return ori_img, img, img_ts
 

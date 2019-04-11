@@ -13,16 +13,20 @@ from sklearn.metrics import roc_curve, roc_auc_score
 from util import *
 
 
-CKPT_PATH = 'pneu_model/pneu_model.ckpt'
+PNEU_PATH = 'models/pneu_model.ckpt'
+CHEX_PATH = 'models/model_14_class.pth.tar'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 16
 
 
-def testPerformance(epsilon, data_path):
+def testPerformance(epsilon, data_path, model_type):
 
 	# Load chexnet model
-	CheXnet_model = loadChexNetModel(CKPT_PATH)
+	if model_type == 'pneu':
+		model = loadPneuModel(PNEU_PATH)
+	if model_type == 'chex':
+		model = loadChexnet14(CHEX_PATH)
 
 	# Define loss function
 	loss_fn = nn.CrossEntropyLoss()
@@ -46,15 +50,15 @@ def testPerformance(epsilon, data_path):
 	for inputs, labels in tqdm(dataloader):
 		inputs = Variable(inputs, requires_grad=True)
 
-		outputs = CheXnet_model(inputs)
+		outputs = model(inputs)
 		_, preds = torch.max(outputs, 1)
 		pred_probs += outputs[:, 1].tolist()
 		gt_labels += labels.tolist()
-		running_corrects += torch.sum(preds == labels.data)
+		running_corrects += torch.sum(preds == labels.data).item()
 
 		loss = loss_fn(outputs, labels)
 		loss.backward()
-
+		
 		# FGSM get adversarial
 		x_grad = torch.sign(inputs.grad.data)
 
@@ -62,10 +66,10 @@ def testPerformance(epsilon, data_path):
 		adv_img = inputs.data + perturbation
 
 		# Predict with adversarial
-		f_ouput = CheXnet_model(adv_img)
+		f_ouput = model(adv_img)
 		_, f_preds = torch.max(f_ouput, 1)
 		pred_probs_adv += f_ouput[:, 1].tolist()
-		running_corrects_adv += torch.sum(f_preds == labels.data)
+		running_corrects_adv += torch.sum(f_preds == labels.data).item()
 
 	# compute metrices
 	auc = roc_auc_score(gt_labels, pred_probs)
@@ -90,13 +94,15 @@ def testPerformance(epsilon, data_path):
 def main(args):
 	epsilon = args.epsilon
 	data_path = args.path
-	testPerformance(epsilon, data_path)
+	model_type = args.model
+	testPerformance(epsilon, data_path, model_type)
 
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--epsilon', type=float, default=0.02, help='a float value of epsilon, default is 0.02')
 	parser.add_argument('--path', type=str, required=True, help='Path to the test images')
+	parser.add_argument('--model', type=str, default='pneu', help='specify which model will be tested: pneu or chex, default is pneu')
 	args = parser.parse_args()
 	main(args)
 

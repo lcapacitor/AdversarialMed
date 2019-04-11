@@ -9,9 +9,9 @@ from torch.autograd.gradcheck import zero_gradients
 from util import *
 
 
-CKPT_PATH = 'pneu_model/pneu_model.ckpt'
-IMG_PATH_NORM = './img/normal/'
-IMG_PATH_PNEU = './img/pneumonia/'
+CKPT_PATH = 'models/pneu_model.ckpt'
+IMG_PATH_NORM = './img/0/'
+IMG_PATH_PNEU = './img/1/'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -23,7 +23,7 @@ def attackBasicIterMethod(data_mode, epsilon, num_iters, alpha):
 	loss_fn = nn.CrossEntropyLoss().to(device)
 
 	# Load chexnet model
-	CheXnet_model = loadChexNetModel(CKPT_PATH)
+	CheXnet_model = loadPneuModel(CKPT_PATH)
 
 	fileFolder = IMG_PATH_NORM if data_mode==0 else IMG_PATH_PNEU
 	files = os.listdir(fileFolder)
