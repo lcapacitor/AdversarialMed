@@ -22,10 +22,10 @@ from differential_evolution import differential_evolution
 from util import *
 
 
-CKPT_PATH = 'pneu_model/pneu_model.ckpt'
+CKPT_PATH = 'models/pneu_model.ckpt'
 IMG_PATH = "./img"
-IMG_PATH_NORM = './img/normal/'
-IMG_PATH_PNEU = './img/pneumonia/'
+IMG_PATH_NORM = './img/0/'
+IMG_PATH_PNEU = './img/1/'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -174,7 +174,7 @@ def main():
     print("==> Loading data and model...")
 
 
-    CheXnet_model = loadChexNetModel(CKPT_PATH)
+    model = loadPneuModel(CKPT_PATH)
 
     fileFolder = IMG_PATH
 
@@ -190,7 +190,7 @@ def main():
 
     print("==> Starting attck...")
 
-    results = attack_all(CheXnet_model, dataloader, pixels=args.pixels, targeted=args.targeted, maxiter=args.maxiter,
+    results = attack_all(model, dataloader, pixels=args.pixels, targeted=args.targeted, maxiter=args.maxiter,
                          popsize=args.popsize, verbose=args.verbose)
     print("Final success rate: %.4f" % results)
 

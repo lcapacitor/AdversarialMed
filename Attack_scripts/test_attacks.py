@@ -17,7 +17,7 @@ PNEU_PATH = 'models/pneu_model.ckpt'
 CHEX_PATH = 'models/model_14_class.pth.tar'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 
 
 def testPerformance(epsilon, data_path, model_type):
@@ -38,7 +38,7 @@ def testPerformance(epsilon, data_path, model_type):
 		transforms.Normalize(mean, std),
 		])
 	image_dataset = datasets.ImageFolder(data_path, data_transform)
-	dataloader = torch.utils.data.DataLoader(image_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+	dataloader = torch.utils.data.DataLoader(image_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
 
 	running_corrects = 0
 	pred_probs = []
@@ -48,15 +48,16 @@ def testPerformance(epsilon, data_path, model_type):
 	pred_probs_adv = []
 
 	for inputs, labels in tqdm(dataloader):
-		inputs = Variable(inputs, requires_grad=True)
+		inputs = Variable(inputs).to(device)
+		inputs.requires_grad = True
 
 		outputs = model(inputs)
 		_, preds = torch.max(outputs, 1)
 		pred_probs += outputs[:, 1].tolist()
 		gt_labels += labels.tolist()
-		running_corrects += torch.sum(preds == labels.data).item()
+		running_corrects += torch.sum(preds.cpu() == labels.data).item()
 
-		loss = loss_fn(outputs, labels)
+		loss = loss_fn(outputs, labels.to(device))
 		loss.backward()
 
 		# FGSM get adversarial
@@ -69,7 +70,7 @@ def testPerformance(epsilon, data_path, model_type):
 		f_ouput = model(adv_img)
 		_, f_preds = torch.max(f_ouput, 1)
 		pred_probs_adv += f_ouput[:, 1].tolist()
-		running_corrects_adv += torch.sum(f_preds == labels.data).item()
+		running_corrects_adv += torch.sum(f_preds.cpu() == labels.data).item()
 
 	# compute metrices
 	auc = roc_auc_score(gt_labels, pred_probs)

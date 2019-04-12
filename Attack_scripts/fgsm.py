@@ -44,9 +44,10 @@ def attackWithFGSM(epsilon, data_mode):
 		loss.backward()
 
 		# FGSM get adversarial
-		x_grad = torch.sign(img_ts.cpu().grad.data)
+		x_grad = torch.sign(img_ts.grad.cpu().data)
 		perturbation = epsilon * x_grad
 		adv_img = img_ts.cpu().data + perturbation
+		adv_img = adv_img.to(device)
 
 		# Predict with adversarial
 		f_ouput = CheXnet_model(adv_img)

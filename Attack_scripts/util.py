@@ -88,9 +88,9 @@ def singleImgPreProc(img_path):
 	img = (img - mean)/std
 	img = img.transpose(2, 0, 1)
 
-	# img_ts = Variable(torch.from_numpy(img).type(torch.float).unsqueeze(0), requires_grad=True).to(device)
 	img_ts = Variable(torch.from_numpy(img).type(torch.float).unsqueeze(0)).to(device)
 	img_ts.requires_grad = True
+	#img_ts = Variable(torch.from_numpy(img).type(torch.float).unsqueeze(0), requires_grad=True).to(device)
 	return ori_img, img, img_ts
 
 
