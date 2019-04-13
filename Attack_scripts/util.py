@@ -94,6 +94,26 @@ def singleImgPreProc(img_path):
 	return ori_img, img, img_ts
 
 
+def saveImage(save_folder, ori_fname, img_ts):
+
+	if not os.path.isdir(save_folder):
+		print ('The given save folder does not exists, creat ./adv_img/ instead')
+		os.mkdir('adv_img/')
+		save_folder = 'adv_img/'
+	
+	img = img_ts.squeeze(0).data.cpu()
+	img = img.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
+	img = np.transpose(img, (1,2,0))   # C x H x W  ==>   H x W x C
+	img = np.clip(img, 0, 1)
+	img = img * 255
+
+	adv_fname = 'adv_' + ori_fname
+	save_path = os.path.join(save_folder, adv_fname)
+
+	print ('save to: ', save_path)
+	cv2.imwrite(save_path, img)
+
+
 def plotFigures(oriImg, preds, ori_score, advImg, f_preds, f_score, x_grad, epsilon):
 
 	# Get original image

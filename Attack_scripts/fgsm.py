@@ -15,7 +15,7 @@ BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
-def attackWithFGSM(epsilon, data_mode):
+def attackWithFGSM(epsilon, fileFolder, is_plot, is_save, save_path):
 
 	# Define loss function
 	loss_fn = nn.CrossEntropyLoss().to(device)
@@ -23,15 +23,18 @@ def attackWithFGSM(epsilon, data_mode):
 	# Load chexnet model
 	CheXnet_model = loadPneuModel(CKPT_PATH)
 
-	fileFolder = IMG_PATH_NORM if data_mode==0 else IMG_PATH_PNEU
 	files = os.listdir(fileFolder)
 
-	label = data_mode
+	if fileFolder.split('/')[-1] == '':
+		label = int(fileFolder.split('/')[-2])
+	else:
+		label = int(fileFolder.split('/')[-1])
+
 	label_var = Variable(torch.Tensor([float(label)]).long(), requires_grad=False).to(device)
 
 	for f in files:
 		# Get images
-		_, _, img_ts = singleImgPreProc(fileFolder + f)
+		_, _, img_ts = singleImgPreProc(os.path.join(fileFolder, f))
 
 		# Predict with model
 		output = CheXnet_model(img_ts)
@@ -56,19 +59,30 @@ def attackWithFGSM(epsilon, data_mode):
 		print ('Adv prediction: {}, probs: {}'.format(BI_ClASS_NAMES[f_preds], f_scores))
 
 		# Plot results
-		plotFigures(img_ts, preds, scores, adv_img, f_preds, f_scores, x_grad, epsilon)
+		if is_plot:
+			plotFigures(img_ts, preds, scores, adv_img, f_preds, f_scores, x_grad, epsilon)
+
+		# Save adv_images
+		if is_save:
+			saveImage(save_path, f, adv_img)
 
 
 def main(args):
 	epsilon = args.epsilon
-	data_type = args.dtype
-	attackWithFGSM(epsilon, data_type)
+	fileFolder = args.fpath
+	is_plot = args.is_plot
+	is_save = args.is_save
+	save_path = args.save_path
+	attackWithFGSM(epsilon, fileFolder, is_plot, is_save, save_path)
 
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--dtype', type=int, default=0, help='type of data to test with, 0 (default): Normal data, 1: Pneumonia data')
+	parser.add_argument('--fpath', type=str, required=True, help='path to the images to attack, e.g. img/0')
 	parser.add_argument('--epsilon', type=float, default=0.02, help='a float value of epsilon, default is 0.02')
+	parser.add_argument('--is_plot', type=int, default=1, help='if plot the attack results, 1: True, 0: False')
+	parser.add_argument('--is_save', type=int, default=0, help='if save the adv_imgs to the given path, 1: True, 0: False')
+	parser.add_argument('--save_path', type=str, help='path of where the adv_imgs being saved')
 	args = parser.parse_args()
 	main(args)
 
