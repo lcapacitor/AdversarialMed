@@ -22,7 +22,7 @@ class BaseModel(nn.Module):
 
 
 class ResBlock(BaseModel):
-    def __init__(self, dim, p):
+    def __init__(self, dim):
         super(ResBlock, self).__init__()
         self.dim = dim
         self.convs = nn.Sequential(
@@ -31,11 +31,6 @@ class ResBlock(BaseModel):
             nn.ReLU(True),
             nn.Conv2d(dim, dim, 3, 1, 1),
             nn.BatchNorm2d(dim),
-            nn.ReLU(True),
-            nn.Conv2d(dim, dim, 3, 1, 1),
-            nn.BatchNorm2d(dim),
-            nn.ReLU(True),
-            nn.Dropout(p),
         )
         
     def forward(self, x):
@@ -51,26 +46,30 @@ class VAE(BaseModel):
         self.hidden_dim = hidden_dim
         self.z_size = z_size
         self.is_res = is_res
-        self.p = drop_p
 
         # encoder
         if self.is_res:
             self.encoder = nn.Sequential(
                 self._conv(channel_num, hidden_dim // 4),
-                ResBlock(hidden_dim // 4, self.p),
+                ResBlock(hidden_dim // 4),
+                self._conv(hidden_dim // 4, hidden_dim // 4),
+                ResBlock(hidden_dim // 4),
                 self._conv(hidden_dim // 4, hidden_dim // 2),
-                ResBlock(hidden_dim // 2, self.p),
+                ResBlock(hidden_dim // 2),
                 self._conv(hidden_dim // 2, hidden_dim, last=True),
+                #nn.Dropout(drop_p),
             )
         else:
             self.encoder = nn.Sequential(
                 self._conv(channel_num, hidden_dim // 4),
+                self._conv(hidden_dim // 4, hidden_dim // 4),
                 self._conv(hidden_dim // 4, hidden_dim // 2),
                 self._conv(hidden_dim // 2, hidden_dim, last=True),
+                #nn.Dropout(drop_p),
             )
 
         # encoded feature's size and volume
-        self.feature_size = image_size // 8
+        self.feature_size = image_size // 16
         self.feature_volume = hidden_dim * (self.feature_size ** 2)
 
         # q
@@ -84,9 +83,11 @@ class VAE(BaseModel):
         if self.is_res:
             self.decoder = nn.Sequential(
                 self._deconv(hidden_dim, hidden_dim // 2),
-                ResBlock(hidden_dim // 2, self.p),
+                ResBlock(hidden_dim // 2),
                 self._deconv(hidden_dim // 2, hidden_dim // 4),
-                ResBlock(hidden_dim // 4, self.p),
+                ResBlock(hidden_dim // 4),
+                self._deconv(hidden_dim // 4, hidden_dim // 4),
+                ResBlock(hidden_dim // 4),
                 self._deconv(hidden_dim // 4, channel_num, last=True),
                 nn.Sigmoid()
             )
@@ -94,6 +95,7 @@ class VAE(BaseModel):
             self.decoder = nn.Sequential(
                 self._deconv(hidden_dim, hidden_dim // 2),
                 self._deconv(hidden_dim // 2, hidden_dim // 4),
+                self._deconv(hidden_dim // 4, hidden_dim // 4),
                 self._deconv(hidden_dim // 4, channel_num, last=True),
                 nn.Sigmoid()
             )
@@ -135,10 +137,10 @@ class VAE(BaseModel):
         return eps.mul(std).add_(mean)
 
     def reconstruction_loss(self, x_reconstructed, x):
-        return nn.BCELoss(size_average=False)(x_reconstructed, x) / x.size(0)
+        return F.binary_cross_entropy(x_reconstructed, x, reduction='sum') / x.size(0)
 
     def kl_divergence_loss(self, mean, logvar):
-        return ((mean**2 + logvar.exp() - 1 - logvar) / 2).sum() / mean.size(0)
+        return -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) / mean.size(0)
 
     # ======
     # Layers

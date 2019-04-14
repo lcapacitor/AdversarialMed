@@ -21,6 +21,23 @@ from torch.utils.data.dataset import Dataset
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+mean = [0.485, 0.456, 0.406]
+std  = [0.229, 0.224, 0.225]
+
+
+def imgProc(img_path, is_target):
+	ori_img = cv2.imread(img_path)
+	ori_img = cv2.resize(ori_img, (224, 224))
+	img = ori_img.copy().astype(np.float32)
+
+	img /= 255.0
+	if not is_target:
+		img = (img - mean)/std
+	img = img.transpose(2, 0, 1)
+	img_ts = Variable(torch.from_numpy(img).type(torch.float)).to(device)
+
+	return img_ts
+
 
 class ImageDataset(Dataset):
 	'''
@@ -35,7 +52,7 @@ class ImageDataset(Dataset):
 	is_train:
 		(bool) if the data for training or test
 	'''
-	def __init__(self, clean_dir, adv_dir, attack_type, transform, setName):
+	def __init__(self, clean_dir, adv_dir, attack_type, setName):
 		self.ori_fileList = []
 		self.adv_fileList = []
 		ori_folder = os.path.join(clean_dir, setName)
@@ -46,16 +63,13 @@ class ImageDataset(Dataset):
 				adv_fname = 'adv_' + f
 				self.adv_fileList.append(os.path.join(adv_folder, adv_fname))
 		assert len(self.ori_fileList)==len(self.adv_fileList)
-		self.transform = transform
 
 	def __len__(self):
 		return len(self.ori_fileList)
 
 	def __getitem__(self, index):
-		ori_img_np = cv2.imread(self.ori_fileList[index])
-		adv_img_np = cv2.imread(self.adv_fileList[index])
-		x = self.transform(adv_img_np)
-		y = self.transform(ori_img_np)
+		x = imgProc(self.ori_fileList[index], is_target=True)
+		y = imgProc(self.adv_fileList[index], is_target=True)
 		assert x.shape == y.shape
 		return x, y
 
@@ -74,8 +88,8 @@ def train(clean_dir, adv_dir, attack_type):
 	warnings.filterwarnings("ignore")
 
 	# Setup Model hyer-param
-	z_size = 1024
-	hidden_dim = 128
+	z_size = 2048
+	hidden_dim = 32
 	drop_p = 0.5
 	image_size = 224
 	channel_num = 3
@@ -84,32 +98,13 @@ def train(clean_dir, adv_dir, attack_type):
 	# Set up training hyer-params
 	lr = 1e-3
 	weight_decay = 1e-5
-	batch_size = 100
+	batch_size = 64
 	num_epochs = 50
 	best_loss = math.inf
 	loss_record = {'train': {'total_loss': [], 'rec_loss':[], 'kl_loss':[]},
  				   'val':   {'total_loss': [], 'rec_loss':[], 'kl_loss':[]}}
 
- 	# Set up dataset and loader
-	data_transforms = {
- 		'train': transforms.Compose([
-            transforms.ToPILImage(), # convert the loaed image from numpay array to PIL Image that is required by transforms.Resize
-            transforms.Resize((image_size, image_size)),
-            transforms.RandomRotation(degrees=10),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
-            transforms.ToTensor(),
-            #transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-            ]),
-        'val': transforms.Compose([
-            transforms.ToPILImage(), # convert the loaed image from numpay array to PIL Image that is required by transforms.Resize
-            transforms.Resize((image_size, image_size)),
-            transforms.ToTensor(),
-            #transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-            ]),
-        }
-
-	dataset = {x: ImageDataset(clean_dir, adv_dir, attack_type, data_transforms[x], x) for x in ['train', 'val']}
+	dataset = {x: ImageDataset(clean_dir, adv_dir, attack_type, x) for x in ['train', 'val']}
 	dataset_sizes = {x: len(dataset[x]) for x in ['train', 'val']}
 	print('Dataset size: train {}, val {}'.format(dataset_sizes['train'], dataset_sizes['val']))
 
@@ -134,7 +129,7 @@ def train(clean_dir, adv_dir, attack_type):
 			if phase == 'train':
 				model.train()
 			else:
-				model.eval()   # Set model to evaluate mode
+				model.eval()
 
             # Initial running loss
 			running_total_loss = 0.0
@@ -144,7 +139,6 @@ def train(clean_dir, adv_dir, attack_type):
 			for inputs, targets in tqdm(dataloaders[phase], desc='{} iterations'.format(phase), leave=False):
 				inputs  = inputs.to(device)
 				targets = targets.to(device)
-
             	# forward-prop
 				with torch.set_grad_enabled(phase == 'train'):
 					(mean, logvar), reconstructed = model(inputs)
