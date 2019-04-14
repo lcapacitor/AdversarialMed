@@ -68,9 +68,14 @@ class ImageDataset(Dataset):
 		return len(self.ori_fileList)
 
 	def __getitem__(self, index):
-		x = imgProc(self.ori_fileList[index], is_target=True)
-		y = imgProc(self.adv_fileList[index], is_target=True)
+		x = imgProc(self.adv_fileList[index], is_target=False)
+		y = imgProc(self.ori_fileList[index], is_target=True)
+		# Assertions
+		_adv = '_'.join(self.adv_fileList[index].split('/')[-1].split('_')[1:])
+		_ori = self.ori_fileList[index].split('/')[-1]
+		assert (_adv == _ori)
 		assert x.shape == y.shape
+		assert (x - y).abs().sum() > 0
 		return x, y
 
 
@@ -142,7 +147,7 @@ def train(clean_dir, adv_dir, attack_type):
             	# forward-prop
 				with torch.set_grad_enabled(phase == 'train'):
 					(mean, logvar), reconstructed = model(inputs)
-					rec_loss = model.reconstruction_loss(reconstructed, inputs)
+					rec_loss = model.reconstruction_loss(reconstructed, targets)
 					kl_loss = model.kl_divergence_loss(mean, logvar)
 					total_loss = rec_loss + kl_loss
 
