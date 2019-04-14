@@ -114,6 +114,61 @@ def saveImage(save_folder, ori_fname, adv_img):
 	print ('save to: ', save_path)
 	cv2.imwrite(save_path, x_adv)
 
+'''
+This function take a batch of pre-processed images array and reconstruct the corresponding original images
+'''
+def unpreprocessBatchImages(batch_imgs):
+	batch_size = batch_imgs.shape[0]
+	batch_imgs = batch_imgs.data.cpu()
+	batch_imgs = batch_imgs.mul(torch.FloatTensor(std).view(3, 1, 1).expand(batch_size, 3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1).expand(batch_size, 3, 1, 1)).detach().numpy()
+	batch_imgs = np.transpose(batch_imgs, (0, 2, 3, 1))  # C X H X W  ==>   H X W X C
+	return torch.from_numpy(np.clip(batch_imgs, 0, 1))
+
+
+
+def plotCleanAdversariallDefenseImages(org, adv, defense_clean, defense_adversarial):
+	# x = org.squeeze(0).data.cpu()
+	# x = x.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1)).detach().numpy()
+	# x = np.transpose(x, (1, 2, 0))  # C X H X W  ==>   H X W X C
+	# x = np.clip(x, 0, 1)
+	x = unpreprocessBatchImages(org)[0]
+
+	# x_adv = adv.squeeze(0).data.cpu()
+	# x_adv = x_adv.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1)).detach().numpy()
+	# x_adv = np.transpose(x_adv, (1, 2, 0))  # C X H X W  ==>   H X W X C
+	# x_adv = np.clip(x_adv, 0, 1)
+	x_adv = unpreprocessBatchImages(adv)[0]
+
+	# x_clean_defense = defense_clean.squeeze(0).data.cpu()
+	# x_clean_defense = x_clean_defense.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1)).detach().numpy()
+	# x_clean_defense = np.transpose(x_clean_defense, (1, 2, 0))  # C X H X W  ==>   H X W X C
+	# x_clean_defense = np.clip(x_clean_defense, 0, 1)
+	x_clean_defense = unpreprocessBatchImages(defense_clean)[0]
+
+	# x_adv_defense = defense_adversarial.squeeze(0).data.cpu()
+	# x_adv_defense = x_adv_defense.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1)).detach().numpy()
+	# x_adv_defense = np.transpose(x_adv_defense, (1, 2, 0))  # C X H X W  ==>   H X W X C
+	# x_adv_defense = np.clip(x_adv_defense, 0, 1)
+	x_adv_defense = unpreprocessBatchImages(defense_adversarial)[0]
+
+
+	figure, ax = plt.subplots(1, 4, figsize=(18, 8))
+
+	ax[0].imshow(x)
+	ax[0].set_title('Clean Example', fontsize=20)
+
+	ax[1].imshow(x_adv)
+	ax[1].set_title('Adversarial Example', fontsize=20)
+
+	ax[2].imshow(x_clean_defense)
+	ax[2].set_title('Defense Clean Example', fontsize=20)
+
+	ax[3].imshow(x_adv_defense)
+	ax[3].set_title('Defense Adversarial Example', fontsize=20)
+
+	plt.show()
+
+
 
 def plotFigures(oriImg, preds, ori_score, advImg, f_preds, f_score, x_grad, epsilon):
 
