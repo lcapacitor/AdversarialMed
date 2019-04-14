@@ -219,8 +219,8 @@ def train(clean_dir, adv_dir, attack_type):
 
 			# Save images
 			if (epoch+1) % visual_interval == 0 and epoch > 0 and phase == 'val':
-				rndIdx = random.randint(0, inputs.size(0))
-				print ('Save reconstructed images, index={}'.format(rndIdx))
+				rndIdx = random.randint(0, inputs.size(0)-1)
+				print ('Save reconstructed images, random index={} in the last batch'.format(rndIdx))
 				visualResults(inputs[rndIdx], reconstructed[rndIdx], targets[rndIdx], epoch+1)
 
 			# Step optimizer scheduler
