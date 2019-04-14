@@ -137,7 +137,11 @@ class VAE(BaseModel):
         return eps.mul(std).add_(mean)
 
     def reconstruction_loss(self, x_reconstructed, x):
-        return F.binary_cross_entropy(x_reconstructed, x, reduction='sum') / x.size(0)
+        #x_rec_im = x_reconstructed * 255
+        #x_im = x * 255
+        #rec_mse_loss = F.mse_loss(x_rec_im, x_im)
+        rec_bce_loss = F.binary_cross_entropy(x_reconstructed, x)
+        return rec_bce_loss
 
     def kl_divergence_loss(self, mean, logvar):
         return -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) / mean.size(0)
