@@ -94,24 +94,25 @@ def singleImgPreProc(img_path):
 	return ori_img, img, img_ts
 
 
-def saveImage(save_folder, ori_fname, img_ts):
+def saveImage(save_folder, ori_fname, adv_img):
 
 	if not os.path.isdir(save_folder):
 		print ('The given save folder does not exists, creat ./adv_img/ instead')
 		os.mkdir('adv_img/')
 		save_folder = 'adv_img/'
 	
-	img = img_ts.squeeze(0).data.cpu()
-	img = img.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
-	img = np.transpose(img, (1,2,0))   # C x H x W  ==>   H x W x C
-	img = np.clip(img, 0, 1)
-	img = img * 255
+	x_adv = adv_img.squeeze(0).data.cpu()
+	x_adv = x_adv.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
+	x_adv = np.transpose(x_adv, (1,2,0))   # C X H X W  ==>   H X W X C
+	x_adv = np.clip(x_adv, 0, 1)
+	x_adv = x_adv * 255
+	print (np.max(x_adv), np.min(x_adv))
 
 	adv_fname = 'adv_' + ori_fname
 	save_path = os.path.join(save_folder, adv_fname)
 
 	print ('save to: ', save_path)
-	cv2.imwrite(save_path, img)
+	cv2.imwrite(save_path, x_adv)
 
 '''
 This function take a batch of pre-processed images array and reconstruct the corresponding original images
