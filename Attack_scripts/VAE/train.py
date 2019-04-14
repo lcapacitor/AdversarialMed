@@ -5,6 +5,7 @@ import math
 import time
 import torch
 import joblib
+import random
 import argparse
 import numpy as np
 import torch.nn as nn
@@ -13,6 +14,7 @@ import torch.nn.functional as F
 
 from tqdm import tqdm
 from vae_conv import VAE
+import matplotlib.pyplot as plt
 from torchvision import transforms
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
@@ -79,6 +81,42 @@ class ImageDataset(Dataset):
 		return x, y
 
 
+def visualResults(adv_img, rec_img, tar_img, epoch):
+
+	assert adv_img.shape == rec_img.shape
+	assert rec_img.shape == tar_img.shape
+	adv = adv_img.data.cpu()
+	adv = adv.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
+	adv = np.transpose(adv, (1,2,0))   # C X H X W  ==>   H X W X C
+	adv = np.clip(adv, 0, 1)
+
+	rec = rec_img.data.cpu().numpy()
+	rec = np.transpose(rec, (1,2,0))
+	rec = np.clip(rec, 0, 1)
+
+	tar = tar_img.data.cpu().numpy()
+	tar = np.transpose(tar, (1,2,0))
+	tar = np.clip(tar, 0, 1)
+
+	figure, ax = plt.subplots(1,3)
+	ax[0].imshow(adv)
+	ax[0].set_title('input adv_img')
+	ax[0].axis('off')
+	ax[1].imshow(rec)
+	ax[1].set_title('output rec_img')
+	ax[1].axis('off')
+	ax[2].imshow(tar)
+	ax[2].set_title('target clean_img')
+	ax[2].axis('off')
+
+	outPath = './trained_records/figures/'
+	outName = 'vae_val_e{}.png'.format(epoch)
+	if not os.path.isdir(outPath):
+		os.mkdir(outPath)
+	plt.savefig(os.path.join(outPath, outName))
+	print ('save fig to: {}'.format(os.path.join(outPath, outName)))
+
+
 def train(clean_dir, adv_dir, attack_type):
 	'''
 	clean_dir:
@@ -93,7 +131,7 @@ def train(clean_dir, adv_dir, attack_type):
 	warnings.filterwarnings("ignore")
 
 	# Setup Model hyer-param
-	z_size = 2048
+	z_size = 1024
 	hidden_dim = 32
 	drop_p = 0.5
 	image_size = 224
@@ -104,7 +142,8 @@ def train(clean_dir, adv_dir, attack_type):
 	lr = 1e-3
 	weight_decay = 1e-5
 	batch_size = 64
-	num_epochs = 50
+	num_epochs = 20
+	visual_interval = 2
 	best_loss = math.inf
 	loss_record = {'train': {'total_loss': [], 'rec_loss':[], 'kl_loss':[]},
  				   'val':   {'total_loss': [], 'rec_loss':[], 'kl_loss':[]}}
@@ -177,6 +216,12 @@ def train(clean_dir, adv_dir, attack_type):
 			# Output training/val results
 			print('{} Loss: total: {:.4f}, rec_loss: {:.4f}, kl_loss: {:.4f}'
 				.format(phase, epoch_total_loss, epoch_rec_loss, epoch_kl_loss))
+
+			# Save images
+			if (epoch+1) % visual_interval == 0 and epoch > 0 and phase == 'val':
+				rndIdx = random.randint(0, inputs.size(0))
+				print ('Save reconstructed images, index={}'.format(rndIdx))
+				visualResults(inputs[rndIdx], reconstructed[rndIdx], targets[rndIdx], epoch+1)
 
 			# Step optimizer scheduler
 			if phase == 'val':
