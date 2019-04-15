@@ -20,11 +20,17 @@ from torch.autograd import Variable
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
+from torchvision import utils
+
+import vae_util, models
+from torch.nn.functional import binary_cross_entropy, relu, nll_loss, cross_entropy, softmax
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 mean = [0.485, 0.456, 0.406]
 std  = [0.229, 0.224, 0.225]
+
+SEEDFRAC = 2
 
 
 def imgProc(img_path, is_target):
@@ -49,22 +55,36 @@ class ImageDataset(Dataset):
 		(str) path to the root folder of all attacked images
 	attack_type:
 		(str) type of attack name
-	transform:
-		(transforms) transforms for data
-	is_train:
-		(bool) if the data for training or test
+	setName:
+		(str) train/valid
+	limit:
+		(int) only return the first limit number of samples
 	'''
-	def __init__(self, clean_dir, adv_dir, attack_type, setName):
+
+	def __init__(self, clean_dir, adv_dir, attack_type, setName, limit=None):
 		self.ori_fileList = []
 		self.adv_fileList = []
+
+		# get absolute path to improve compatibility
+		# clean_dir = os.path.abspath(clean_dir)
+		# adv_dir = os.path.abspath(adv_dir)
+
+		# fix a bug on windows for desktop.ini file
+		allowed_exts = [".jpeg", ".jpg"]
+
 		ori_folder = os.path.join(clean_dir, setName)
 		adv_folder = os.path.join(adv_dir, attack_type, setName)
 		for path, subdirs, files in os.walk(ori_folder):
+			files = [f for f in files if f.lower().endswith(tuple(allowed_exts))]
 			for f in files:
 				self.ori_fileList.append(os.path.join(path, f))
 				adv_fname = 'adv_' + f
 				self.adv_fileList.append(os.path.join(adv_folder, adv_fname))
-		assert len(self.ori_fileList)==len(self.adv_fileList)
+		assert len(self.ori_fileList) == len(self.adv_fileList)
+
+		if limit is not None:
+			self.ori_fileList = self.ori_fileList[:limit]
+			self.adv_fileList = self.adv_fileList[:limit]
 
 	def __len__(self):
 		return len(self.ori_fileList)
@@ -75,7 +95,7 @@ class ImageDataset(Dataset):
 		# Assertions
 		_adv = '_'.join(self.adv_fileList[index].split('/')[-1].split('_')[1:])
 		_ori = self.ori_fileList[index].split('/')[-1]
-		assert (_adv == _ori)
+		# assert (_adv == _ori)
 		assert x.shape == y.shape
 		assert (x - y).abs().sum() > 0
 		return x, y
@@ -117,7 +137,7 @@ def visualResults(adv_img, rec_img, tar_img, epoch):
 	print ('save fig to: {}'.format(os.path.join(outPath, outName)))
 
 
-def train(clean_dir, adv_dir, attack_type):
+def train(clean_dir, adv_dir, attack_type, usePixelVAE, limit):
 	'''
 	clean_dir:
 		(str) path of the root folder of all clean images
@@ -131,24 +151,28 @@ def train(clean_dir, adv_dir, attack_type):
 	warnings.filterwarnings("ignore")
 
 	# Setup Model hyer-param
-	z_size = 1024
+	# z_size = 1024
+	z_size = 32
 	hidden_dim = 32
 	drop_p = 0.5
 	image_size = 224
 	channel_num = 3
 	is_res = True
+	vae_kl_beta = 0.01
 
 	# Set up training hyer-params
 	lr = 1e-3
 	weight_decay = 1e-5
-	batch_size = 64
+	batch_size = 1
 	num_epochs = 20
-	visual_interval = 2
+	visual_interval = 1
 	best_loss = math.inf
 	loss_record = {'train': {'total_loss': [], 'rec_loss':[], 'kl_loss':[]},
  				   'val':   {'total_loss': [], 'rec_loss':[], 'kl_loss':[]}}
 
-	dataset = {x: ImageDataset(clean_dir, adv_dir, attack_type, x) for x in ['train', 'val']}
+	samlpe_limit = None
+
+	dataset = {x: ImageDataset(clean_dir, adv_dir, attack_type, x, samlpe_limit) for x in ['train', 'val']}
 	dataset_sizes = {x: len(dataset[x]) for x in ['train', 'val']}
 	print('Dataset size: train {}, val {}'.format(dataset_sizes['train'], dataset_sizes['val']))
 
@@ -156,13 +180,52 @@ def train(clean_dir, adv_dir, attack_type):
                    'val'  : DataLoader(dataset['val'],   batch_size=batch_size, shuffle=False, num_workers=0)}
 
     # Initialize VAE model, optimizer and scheduler
-	model = VAE(image_size, channel_num, hidden_dim, z_size, is_res, drop_p).to(device)
-	optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), weight_decay=weight_decay)
-	scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=5, threshold=1e-7)
+	if usePixelVAE:
+		vae_depth = 0
+		OUTCN = 64
+		feature_maps = 60
+		pixel_cnn_num_layers = 3
+		pixel_cnn_kernel_size = 7
+		pixel_cnn_padding = pixel_cnn_kernel_size // 2
+		C, H, W = channel_num, image_size, image_size
+
+		sample_zs = torch.randn(1, z_size)
+		sample_zs = sample_zs.unsqueeze(1).expand(1, 1, -1).contiguous().view(1, 1, -1).squeeze(1)
+
+		# A sample of 4 square images with 3 channels, of the chosen resolution
+		# (4 so we can arrange them in a 12 by 12 grid)
+		sample_init_zeros = torch.zeros(1, C, H, W)
+		sample_init_seeds = torch.zeros(1, C, H, W)
+
+		sh, sw = H // SEEDFRAC, W // SEEDFRAC
+
+		model = models.PixelVAE(C, H, W, z_size, vae_depth, C, OUTCN, pixel_cnn_num_layers, pixel_cnn_kernel_size, pixel_cnn_padding, feature_maps).to(device)
+
+		# encoder = models.ImEncoder(in_size=(H, W), zsize=z_size, use_res=True, use_bn=True, depth=vae_depth, colors=C)
+		# decoder = models.ImDecoder(in_size=(H, W), zsize=z_size, use_res=True, use_bn=True, depth=vae_depth, out_channels=OUTCN)
+		# pixcnn  = models.LGated((C, H, W), OUTCN, channel_num, num_layers=pixel_cnn_num_layers, k=pixel_cnn_kernel_size, padding=pixel_cnn_padding)
+		#
+		# pixel_vae_mods = [encoder, decoder, pixcnn]
+		#
+		# for m in pixel_vae_mods:
+		# 	m.to(device)
+		#
+		# params = []
+		# for m in pixel_vae_mods:
+		# 	params.extend(m.parameters())
+
+		optimizer = optim.Adam(model.parameters(), lr=lr)
+		scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=5, threshold=1e-7)
+	else:
+		model = VAE(image_size, channel_num, hidden_dim, z_size, is_res, drop_p).to(device)
+		optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), weight_decay=weight_decay)
+		scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=5, threshold=1e-7)
 
     # Training
 	print ('Start training on {}...'.format(device))
 	since = time.time()
+
+	instances_seen = 0
 
 	for epoch in range(num_epochs):
 		print('\nEpoch {}/{}, lr: {}, wd: {}'.format(epoch + 1, num_epochs,
@@ -174,6 +237,17 @@ def train(clean_dir, adv_dir, attack_type):
 				model.train()
 			else:
 				model.eval()
+			# 	if usePixelVAE:
+			# 		for m in pixel_vae_mods:
+			# 			m.train(True)
+			# 	else:
+			# 		model.train()
+			# else:
+			# 	if usePixelVAE:
+			# 		for m in pixel_vae_mods:
+			# 			m.eval()
+			# 	else:
+			# 		model.eval()
 
             # Initial running loss
 			running_total_loss = 0.0
@@ -181,14 +255,33 @@ def train(clean_dir, adv_dir, attack_type):
 			running_kl_loss = 0.0
 
 			for inputs, targets in tqdm(dataloaders[phase], desc='{} iterations'.format(phase), leave=False):
+				b, c, w, h = inputs.size()
+
 				inputs  = inputs.to(device)
 				targets = targets.to(device)
             	# forward-prop
 				with torch.set_grad_enabled(phase == 'train'):
-					(mean, logvar), reconstructed = model(inputs)
-					rec_loss = model.reconstruction_loss(reconstructed, targets)
-					kl_loss = model.kl_divergence_loss(mean, logvar)
-					total_loss = rec_loss + kl_loss
+					if usePixelVAE:
+						(mu, sigma), reconstructed = model(inputs)
+						kl_loss = vae_util.kl_loss(mu, sigma)
+						rec_loss = cross_entropy(reconstructed, (targets* 255).long(), reduce=False).view(b, -1).sum(dim=1)
+						rec_loss = rec_loss * vae_util.LOG2E  # Convert from nats to bits
+						total_loss = (rec_loss + kl_loss).mean()
+
+						# # Forward pass
+						# zs = encoder(inputs)
+						# kl_loss = vae_util.kl_loss(*zs)
+						# z = vae_util.sample(*zs)
+						# out = decoder(z)
+						# rec = pixcnn(inputs, out)
+						# rec_loss = cross_entropy(rec, targets.long(), reduce=False).view(b, -1).sum(dim=1)
+						# rec_loss = rec_loss * vae_util.LOG2E  # Convert from nats to bits
+						# total_loss = (rec_loss + kl_loss).mean()
+					else:
+						(mean, logvar), reconstructed = model(inputs)
+						rec_loss = model.reconstruction_loss(reconstructed, targets)
+						kl_loss = model.kl_divergence_loss(mean, logvar) * vae_kl_beta
+						total_loss = rec_loss + kl_loss
 
                     # backward + optimize only if in training phase
 					if phase == 'train':
@@ -219,9 +312,17 @@ def train(clean_dir, adv_dir, attack_type):
 
 			# Save images
 			if (epoch+1) % visual_interval == 0 and epoch > 0 and phase == 'val':
-				rndIdx = random.randint(0, inputs.size(0)-1)
-				print ('Save reconstructed images, random index={} in the last batch'.format(rndIdx))
-				visualResults(inputs[rndIdx], reconstructed[rndIdx], targets[rndIdx], epoch+1)
+				if usePixelVAE:
+					pass
+					# sample_zeros = vae_util.draw_sample(sample_init_zeros, model.decoder, model.pixcnn, sample_zs, seedsize=(0, 0))
+					# sample_seeds = vae_util.draw_sample(sample_init_seeds, model.decoder, model.pixcnn, sample_zs, seedsize=(sh, W))
+					# sample = torch.cat([sample_zeros, sample_seeds], dim=0)
+					#
+					# utils.save_image(sample, './trained_records/figures/pixelvae_{:02d}.png'.format(epoch), nrow=12, padding=0)
+				else:
+					rndIdx = random.randint(0, inputs.size(0)-1)
+					print ('Save reconstructed images, random index={} in the last batch'.format(rndIdx))
+					visualResults(inputs[rndIdx], reconstructed[rndIdx], targets[rndIdx], epoch+1)
 
 			# Step optimizer scheduler
 			if phase == 'val':
@@ -259,7 +360,9 @@ def main(args):
 	clean_dir = args.clean_dir
 	adv_dir = args.adv_dir
 	attack_type = args.attack_type
-	train(clean_dir, adv_dir, attack_type)
+	use_pixel = args.usePixelVAE
+	limit = args.limit
+	train(clean_dir, adv_dir, attack_type, use_pixel, limit)
 
 
 if __name__ == '__main__':
@@ -267,5 +370,10 @@ if __name__ == '__main__':
 	parser.add_argument('--clean_dir', type=str, required=True, help='root folder of the clean images')
 	parser.add_argument('--adv_dir', type=str, required=True, help='root folder of the adversarial images')
 	parser.add_argument('--attack_type', type=str, required=True, help='type of attacks, e.g. fgsm, b_iter')
+	parser.add_argument('--usePixelVAE', action='store_true', help='flag to indicate if want to use PixelVAE')
+	parser.add_argument("--limit",
+						dest="limit",
+						help="Limit on the number of instances seen per epoch (for debugging).",
+						default=None, type=int)
 	args = parser.parse_args()
 	main(args)
