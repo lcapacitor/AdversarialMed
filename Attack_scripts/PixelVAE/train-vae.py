@@ -113,27 +113,6 @@ def go(arg):
                                                  shuffle=False, num_workers=2)
 
         C, H, W = 3, 64, 64
-
-    elif arg.task == 'chest':
-        mean = [0.485, 0.456, 0.406]
-        std = [0.229, 0.224, 0.225]
-
-        transform = Compose([ToTensor()])
-
-        transform = Compose([Resize((224, 224)), ToTensor(), Normalize(mean, std),])
-
-        trainset = torchvision.datasets.ImageFolder(root=arg.data_dir + os.sep + 'train',
-                                                    transform=transform)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=arg.batch_size,
-                                                  shuffle=True, num_workers=2)
-
-        testset = torchvision.datasets.ImageFolder(root=arg.data_dir + os.sep + 'valid',
-                                                   transform=transform)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=arg.batch_size,
-                                                 shuffle=False, num_workers=2)
-
-        C, H, W = 3, 64, 64
-
     else:
         raise Exception('Task {} not recognized.'.format(arg.task))
 
