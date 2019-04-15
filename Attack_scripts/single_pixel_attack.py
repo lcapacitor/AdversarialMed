@@ -31,13 +31,13 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 parser = argparse.ArgumentParser(description='One pixel attack with PyTorch')
-parser.add_argument('--pixels', default=3, type=int, help='The number of pixels that can be perturbed.')
+parser.add_argument('--pixels', default=20, type=int, help='The number of pixels that can be perturbed.')
 # parser.add_argument('--maxiter', default=100, type=int, help='The maximum number of iteration in the DE algorithm.')
 parser.add_argument('--maxiter', default=100, type=int, help='The maximum number of iteration in the DE algorithm.')
-# parser.add_argument('--popsize', default=400, type=int, help='The number of adverisal examples in each iteration.')
-parser.add_argument('--popsize', default=8, type=int, help='The number of adverisal examples in each iteration.')
-# parser.add_argument('--samples', default=100, type=int, help='The number of image samples to attack.')
-parser.add_argument('--samples', default=2, type=int, help='The number of image samples to attack.')
+parser.add_argument('--popsize', default=400, type=int, help='The number of adverisal examples in each iteration.')
+# parser.add_argument('--popsize', default=16, type=int, help='The number of adverisal examples in each iteration.')
+parser.add_argument('--samples', default=100, type=int, help='The number of image samples to attack.')
+# parser.add_argument('--samples', default=4, type=int, help='The number of image samples to attack.')
 parser.add_argument('--targeted', action='store_true', help='Set this switch to test for targeted attacks.')
 parser.add_argument('--verbose', action='store_true', help='Print out additional information every iteration.')
 
