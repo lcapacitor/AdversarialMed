@@ -163,7 +163,7 @@ def train(clean_dir, adv_dir, attack_type, usePixelVAE, limit):
 	# Set up training hyer-params
 	lr = 1e-3
 	weight_decay = 1e-5
-	batch_size = 1
+	batch_size = 8
 	num_epochs = 20
 	visual_interval = 1
 	best_loss = math.inf
@@ -224,8 +224,6 @@ def train(clean_dir, adv_dir, attack_type, usePixelVAE, limit):
     # Training
 	print ('Start training on {}...'.format(device))
 	since = time.time()
-
-	instances_seen = 0
 
 	for epoch in range(num_epochs):
 		print('\nEpoch {}/{}, lr: {}, wd: {}'.format(epoch + 1, num_epochs,
