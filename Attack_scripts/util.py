@@ -217,3 +217,33 @@ def plotFigures(oriImg, preds, ori_score, advImg, f_preds, f_score, x_grad, epsi
 	ax[2].text(0.5,-0.13, "Prediction: {}\n Probability: {:.4f}".format(BI_ClASS_NAMES[f_preds], np.max(f_score)), size=15, ha="center", transform=ax[2].transAxes)
 
 	plt.show()
+
+
+def generateAdvExamples(model, loss_fn, label_var, inputs, epsilon, num_iters, alpha, attack_type):
+    if attack_type.lower() == 'fgsm':
+        # FGSM get adversarial
+        x_grad = torch.sign(inputs.grad.data)
+        perturbation = epsilon * x_grad
+        x_adv = inputs.data + perturbation
+        return x_adv
+
+    elif attack_type.lower() == 'b_iter':
+        x_ori = Variable(inputs.data, requires_grad=True)
+        x_adv = Variable(inputs.data, requires_grad=True)
+        # Loop over each iteration
+        for i in range(num_iters):
+            zero_gradients(x_adv)
+            output_iter = model(x_adv)
+            loss_iter = loss_fn(output_iter, label_var)
+            loss_iter.backward()
+
+            x_grad  = alpha * torch.sign(x_adv.grad.data)
+
+            perturbation = (x_adv.data + x_grad) - x_ori.data
+            perturbation = torch.clamp(perturbation, -epsilon, epsilon)
+
+            x_adv.data = x_ori.data + perturbation
+        return x_adv.data
+    else:
+        raise AttributeError("Provided attack type not supported")
+        return 0

@@ -1,11 +1,12 @@
 import os
+import util
 import torch
 import argparse
 import torchvision
 import torch.nn as nn
 from torchvision import transforms
 from torch.autograd import Variable
-from util import *
+
 
 
 CKPT_PATH = 'models/pneu_model.ckpt'
@@ -21,7 +22,7 @@ def attackWithFGSM(epsilon, fileFolder, is_plot, is_save, save_path):
 	loss_fn = nn.CrossEntropyLoss().to(device)
 
 	# Load chexnet model
-	CheXnet_model = loadPneuModel(CKPT_PATH)
+	CheXnet_model = util.loadPneuModel(CKPT_PATH)
 
 	files = os.listdir(fileFolder)
 
@@ -34,7 +35,7 @@ def attackWithFGSM(epsilon, fileFolder, is_plot, is_save, save_path):
 
 	for f in files:
 		# Get images
-		_, _, img_ts = singleImgPreProc(os.path.join(fileFolder, f))
+		_, _, img_ts = util.singleImgPreProc(os.path.join(fileFolder, f))
 
 		# Predict with model
 		output = CheXnet_model(img_ts)
@@ -60,11 +61,11 @@ def attackWithFGSM(epsilon, fileFolder, is_plot, is_save, save_path):
 
 		# Plot results
 		if is_plot:
-			plotFigures(img_ts, preds, scores, adv_img, f_preds, f_scores, x_grad, epsilon)
+			util.plotFigures(img_ts, preds, scores, adv_img, f_preds, f_scores, x_grad, epsilon)
 
 		# Save adv_images
 		if is_save:
-			saveImage(save_path, f, adv_img)
+			util.saveImage(save_path, f, adv_img)
 
 
 def main(args):
@@ -85,7 +86,3 @@ if __name__ == '__main__':
 	parser.add_argument('--save_path', type=str, help='path of where the adv_imgs being saved')
 	args = parser.parse_args()
 	main(args)
-
-	
-
- 

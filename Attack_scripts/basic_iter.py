@@ -1,4 +1,5 @@
 import os
+import util
 import torch
 import argparse
 import torchvision
@@ -6,7 +7,6 @@ import torch.nn as nn
 from torchvision import transforms
 from torch.autograd import Variable
 from torch.autograd.gradcheck import zero_gradients
-from util import *
 
 
 CKPT_PATH = 'models/pneu_model.ckpt'
@@ -23,7 +23,7 @@ def attackBasicIterMethod(fileFolder, epsilon, num_iters, alpha, is_plot, is_sav
 	loss_fn = nn.CrossEntropyLoss().to(device)
 
 	# Load chexnet model
-	CheXnet_model = loadPneuModel(CKPT_PATH)
+	CheXnet_model = util.loadPneuModel(CKPT_PATH)
 
 	files = os.listdir(fileFolder)
 
@@ -36,7 +36,7 @@ def attackBasicIterMethod(fileFolder, epsilon, num_iters, alpha, is_plot, is_sav
 
 	for f in files:
 		# Get images
-		_, img, img_ts = singleImgPreProc(os.path.join(fileFolder, f))
+		_, img, img_ts = util.singleImgPreProc(os.path.join(fileFolder, f))
 
 		# Predict with model
 		output = CheXnet_model(img_ts)
@@ -44,7 +44,11 @@ def attackBasicIterMethod(fileFolder, epsilon, num_iters, alpha, is_plot, is_sav
 		scores = output.data.cpu().numpy()
 		print ('Actual prediction: {}, probs: {}, GT label: {}'.format(BI_ClASS_NAMES[preds], scores, BI_ClASS_NAMES[label]))
 
-		x_adv = img_ts
+		'''
+		x_adv = util.generateAdvExamples(CheXnet_model, loss_fn, label_var, img_ts, epsilon, num_iters, alpha, attack_type='b_iter')
+
+		'''
+		x_adv = Variable(img_ts.data, requires_grad=True)
 		ori_img_ts = torch.from_numpy(img).type(torch.float).unsqueeze(0).to(device)
 
 		# Loop over each iteration
@@ -68,13 +72,19 @@ def attackBasicIterMethod(fileFolder, epsilon, num_iters, alpha, is_plot, is_sav
 			f_scores = f_ouput.data.cpu().numpy()
 			print ('Iter {}/{}, adv prediction: {}, probs: {}'.format(i+1, num_iters, BI_ClASS_NAMES[f_preds], f_scores))
 
+		# Predict with adversarial
+		f_ouput = CheXnet_model(x_adv)
+		_, f_preds = torch.max(f_ouput, 1)
+		f_scores = f_ouput.data.cpu().numpy()
+		print ('Adv prediction: {}, probs: {}'.format(BI_ClASS_NAMES[f_preds], f_scores))
+		
 		# Plot results
 		if is_plot:
-			plotFigures(img_ts, preds, scores, x_adv, f_preds, f_scores, perturbation, epsilon)
+			util.plotFigures(img_ts, preds, scores, x_adv, f_preds, f_scores, perturbation, epsilon)
 
 		# Save adv_images
 		if is_save:
-			saveImage(save_path, f, x_adv)
+			util.saveImage(save_path, f, x_adv)
 
 
 def main(args):
