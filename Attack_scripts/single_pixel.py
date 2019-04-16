@@ -2,6 +2,7 @@ from util import *
 import torch.nn.functional as F
 from differential_evolution import differential_evolution
 # from scipy.optimize import differential_evolution
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def perturb_image(xs, img):
     if xs.ndim < 2:
