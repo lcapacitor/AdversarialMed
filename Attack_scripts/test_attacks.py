@@ -16,6 +16,8 @@ from advertorch.defenses import JPEGFilter
 
 from util import *
 
+from single_pixel import attack_max_iter
+
 _to_pil_image = transforms.ToPILImage()
 _to_tensor = transforms.ToTensor()
 
@@ -23,9 +25,10 @@ PNEU_PATH = 'models/pneu_model.ckpt'
 CHEX_PATH = 'models/model_14_class.pth.tar'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE = 3
+BATCH_SIZE = 32
+IMG_SIZE = 224
 
-def testPerformance(epsilon, data_path, model_type, defense_type):
+def testPerformance(epsilon, data_path, model_type, defense_type, attack_type):
     # Initialize Defense
     bits_squeezing = BitSqueezing(bit_depth=5)
     median_filter = MedianSmoothing2D(kernel_size=3)
@@ -48,7 +51,7 @@ def testPerformance(epsilon, data_path, model_type, defense_type):
 
     # Setup data loader
     data_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
         transforms.ToTensor(),
         transforms.Normalize(mean, std),
     ])
@@ -81,11 +84,23 @@ def testPerformance(epsilon, data_path, model_type, defense_type):
         loss = loss_fn(outputs, labels.to(device))
         loss.backward()
 
-        # FGSM get adversarial
-        x_grad = torch.sign(inputs.grad.data)
 
-        perturbation = epsilon * x_grad
-        adv_img = inputs.data + perturbation
+        if attack_type.lower() == 'fgsm':
+            # FGSM get adversarial
+            x_grad = torch.sign(inputs.grad.data)
+
+            perturbation = epsilon * x_grad
+            adv_img = inputs.data + perturbation
+
+        elif attack_type.lower() == 'singlepixel':
+            adv_list = []
+            for _,(input, label) in enumerate(zip(inputs, labels)):
+                adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1 - label.item(), pixels=20,
+                                              maxiter=200, popsize=50, verbose=False)
+                adv_list.append(adversarial)
+            adv_img = torch.cat(adv_list, dim = 0)
+        else:
+            raise AttributeError("Provided attack type is not recognized.")
 
         # Predict with adversarial
         f_ouput = model(adv_img)
@@ -177,7 +192,8 @@ def main(args):
     data_path = args.path
     model_type = args.model
     defense_type = args.defense
-    testPerformance(epsilon, data_path, model_type, defense_type)
+    attack_type = args.attack_type
+    testPerformance(epsilon, data_path, model_type, defense_type, attack_type)
 
 
 if __name__ == '__main__':
@@ -187,5 +203,6 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default='pneu',
                         help='specify which model will be tested: pneu or chex, default is pneu')
     parser.add_argument('--defense', type=str, default=None, help='specify which defense to use: JPEG, default is None')
+    parser.add_argument('--attack_type', type=str, default='fgsm', help='the type of attak supported: fgsm, singlepixel')
     args = parser.parse_args()
     main(args)
