@@ -16,7 +16,6 @@ from advertorch.defenses import MedianSmoothing2D
 from advertorch.defenses import BitSqueezing
 from advertorch.defenses import JPEGFilter
 
-
 _to_pil_image = transforms.ToPILImage()
 _to_tensor = transforms.ToTensor()
 
@@ -26,7 +25,7 @@ CHEX_PATH = 'models/model_14_class.pth.tar'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 20
-
+IMG_SIZE = 224
 
 def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
     # Initialize Defense
@@ -51,7 +50,7 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
 
     # Setup data loader
     data_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
         transforms.ToTensor(),
         transforms.Normalize(util.mean, util.std),
     ])
@@ -196,7 +195,7 @@ if __name__ == '__main__':
     import warnings
     warnings.filterwarnings("ignore")
     parser = argparse.ArgumentParser()
-    parser.add_argument('--attack', type=str, nargs='+', required=True, help='specify which attack to use: fgsm and/or b_iter, default is fgsm')
+    parser.add_argument('--attack', type=str, nargs='+', required=True, help='specify which attack to use: fgsm and/or b_iter/pixelattack, default is fgsm')
     parser.add_argument('--epsilon', type=float, default=0.02, help='a float value of epsilon, default is 0.02')
     parser.add_argument('--path', type=str, required=True, help='Path to the test images')
     parser.add_argument('--model', type=str, default='pneu',

@@ -10,12 +10,13 @@ import torch.nn as nn
 from torchvision import transforms
 from torch.autograd import Variable
 from torch.autograd.gradcheck import zero_gradients
-
+from single_pixel import attack_max_iter
 
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 mean = [0.485, 0.456, 0.406]
 std  = [0.229, 0.224, 0.225]
+IMG_SIZE = 224
 
 
 def loadPneuModel(model_path):
@@ -100,7 +101,7 @@ def saveImage(save_folder, ori_fname, img_ts):
         print ('The given save folder does not exists, creat ./adv_img/ instead')
         os.mkdir('adv_img/')
         save_folder = 'adv_img/'
-    
+
     x_adv = img_ts.squeeze(0).data.cpu()
     x_adv = x_adv.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
     x_adv = np.transpose(x_adv, (1,2,0))   # C X H X W  ==>   H X W X C
@@ -124,6 +125,51 @@ def unpreprocessBatchImages(batch_imgs):
     batch_imgs = batch_imgs.mul(torch.FloatTensor(std).view(3, 1, 1).expand(batch_size, 3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1).expand(batch_size, 3, 1, 1)).detach().numpy()
     batch_imgs = np.transpose(batch_imgs, (0, 2, 3, 1))  # C X H X W  ==>   H X W X C
     return torch.from_numpy(np.clip(batch_imgs, 0, 1))
+
+
+
+def plotCleanAdversariallDefenseImages(org, adv, defense_clean, defense_adversarial):
+    # x = org.squeeze(0).data.cpu()
+    # x = x.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1)).detach().numpy()
+    # x = np.transpose(x, (1, 2, 0))  # C X H X W  ==>   H X W X C
+    # x = np.clip(x, 0, 1)
+    x = unpreprocessBatchImages(org)[0]
+
+    # x_adv = adv.squeeze(0).data.cpu()
+    # x_adv = x_adv.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1)).detach().numpy()
+    # x_adv = np.transpose(x_adv, (1, 2, 0))  # C X H X W  ==>   H X W X C
+    # x_adv = np.clip(x_adv, 0, 1)
+    x_adv = unpreprocessBatchImages(adv)[0]
+
+    # x_clean_defense = defense_clean.squeeze(0).data.cpu()
+    # x_clean_defense = x_clean_defense.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1)).detach().numpy()
+    # x_clean_defense = np.transpose(x_clean_defense, (1, 2, 0))  # C X H X W  ==>   H X W X C
+    # x_clean_defense = np.clip(x_clean_defense, 0, 1)
+    x_clean_defense = unpreprocessBatchImages(defense_clean)[0]
+
+    # x_adv_defense = defense_adversarial.squeeze(0).data.cpu()
+    # x_adv_defense = x_adv_defense.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3, 1, 1)).detach().numpy()
+    # x_adv_defense = np.transpose(x_adv_defense, (1, 2, 0))  # C X H X W  ==>   H X W X C
+    # x_adv_defense = np.clip(x_adv_defense, 0, 1)
+    x_adv_defense = unpreprocessBatchImages(defense_adversarial)[0]
+
+
+    figure, ax = plt.subplots(1, 4, figsize=(18, 8))
+
+    ax[0].imshow(x)
+    ax[0].set_title('Clean Example', fontsize=20)
+
+    ax[1].imshow(x_adv)
+    ax[1].set_title('Adversarial Example', fontsize=20)
+
+    ax[2].imshow(x_clean_defense)
+    ax[2].set_title('Defense Clean Example', fontsize=20)
+
+    ax[3].imshow(x_adv_defense)
+    ax[3].set_title('Defense Adversarial Example', fontsize=20)
+
+    plt.show()
+
 
 
 def plotFigures(oriImg, preds, ori_score, advImg, f_preds, f_score, x_grad, epsilon):
@@ -200,6 +246,17 @@ def generateAdvExamples(model, loss_fn, label_var, inputs, epsilon, num_iters, a
 
             x_adv.data = x_ori.data + perturbation
         return x_adv.data
+
+    elif attack_type.lower() == 'pixelattack':
+        # FGSM get adversarial
+        adv_list = []
+        for _, (input, label) in enumerate(zip(inputs, label_var)):
+            # adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1 - label.item(), pixels=20,
+            #                               maxiter=200, popsize=50, verbose=False)
+            adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1 - label.item(), pixels=3,maxiter=10, popsize=6, verbose=True)
+            adv_list.append(adversarial)
+        adv_img = torch.cat(adv_list, dim=0)
+        return adv_img
     else:
         raise AttributeError("Provided attack type not supported")
         return 0
