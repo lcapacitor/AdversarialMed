@@ -59,7 +59,7 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
         transforms.Normalize(util.mean, util.std),
     ])
     image_dataset = datasets.ImageFolder(data_path, data_transform)
-    dataloader = torch.utils.data.DataLoader(image_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+    dataloader = torch.utils.data.DataLoader(image_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
     running_corrects = 0
     pred_probs = []
@@ -226,7 +226,7 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
 
                 plt.plot(fpr_defense, tpr_defense, '-.', label='def: {} on clean (auc={:.4f}, acc={:.4f}, f1={:.4f})'
                     .format(defs, auc_defense, accuracy_defense, f1_def))
-                plt.plot(fpr_adv_defense, tpr_adv_defense, '-.',label='def: {} on {} (auc={:.4f}, acc={:.4f}), f1={:.4f})'
+                plt.plot(fpr_adv_defense, tpr_adv_defense, '-.',label='def: {} on {} (auc={:.4f}, acc={:.4f}, f1={:.4f})'
                     .format(defs, att, auc_adv_defense, accuracy_adv_defense, f1_adv_def))
 
     plt.xlabel('fpr')
@@ -248,7 +248,8 @@ if __name__ == '__main__':
     import warnings
     warnings.filterwarnings("ignore")
     parser = argparse.ArgumentParser()
-    parser.add_argument('--attack', type=str, nargs='+', required=True, help='specify which attack to use: fgsm, b_iter, pixel, default is fgsm')
+    parser.add_argument('--attack', type=str, nargs='+', required=True, 
+        help='specify which attack to use: fgsm, i-fgsm, pgd, pixel, mi-fgsm')
     parser.add_argument('--epsilon', type=float, default=0.02, help='a float value of epsilon, default is 0.02')
     parser.add_argument('--path', type=str, required=True, help='Path to the test images')
     parser.add_argument('--model', type=str, default='pneu',

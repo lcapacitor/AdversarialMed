@@ -1,6 +1,7 @@
 import os
 import re
 import cv2
+import foolbox
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -13,6 +14,8 @@ from torchvision import transforms
 from torch.autograd import Variable
 from torch.autograd.gradcheck import zero_gradients
 from single_pixel import attack_max_iter
+from advertorch.attacks import LinfPGDAttack, LocalSearchAttack, SinglePixelAttack, MomentumIterativeAttack
+
 
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -256,7 +259,7 @@ def generateAdvExamples(model, loss_fn, label_var, inputs, epsilon, num_iters, a
         x_adv = inputs.data + perturbation
         return x_adv
 
-    elif attack_type.lower() == 'b_iter':
+    elif attack_type.lower() == 'i-fgsm':
         x_ori = Variable(inputs.data, requires_grad=True)
         x_adv = Variable(inputs.data, requires_grad=True)
         # Loop over each iteration
@@ -274,17 +277,37 @@ def generateAdvExamples(model, loss_fn, label_var, inputs, epsilon, num_iters, a
             x_adv.data = x_ori.data + perturbation
         return x_adv.data
 
+    elif attack_type.lower() == 'pgd':
+        adversary = LinfPGDAttack(model, loss_fn=nn.CrossEntropyLoss(), eps=0.3, nb_iter=40,
+                                  eps_iter=0.01, rand_init=True, clip_min=0.0, clip_max=1.0, targeted=False)
+        x_adv = adversary.perturb(inputs, label_var)
+        return x_adv
+
+    elif attack_type.lower() == 'mi-fgsm':
+        adversary = MomentumIterativeAttack(model, loss_fn=nn.CrossEntropyLoss())
+        x_adv = adversary.perturb(inputs, label_var)
+        return x_adv
+
+    elif attack_type.lower() == 'local':
+        adversary = LocalSearchAttack(model)
+        x_adv = adversary.perturb(inputs, label_var)
+        return x_adv
+
     elif attack_type.lower() == 'pixel':
-        # FGSM get adversarial
-        adv_list = []
-        for _, (input, label) in enumerate(zip(inputs, label_var)):
+        adversary = SinglePixelAttack(model)
+        x_adv = adversary.perturb(inputs, label_var)
+        return x_adv
+
+    #elif attack_type.lower() == 'pixel':
+    #    adv_list = []
+    #    for _, (input, label) in enumerate(zip(inputs, label_var)):
             # adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1 - label.item(), pixels=20,
             #                               maxiter=200, popsize=50, verbose=False)
-            adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1-label.item(), 
-                pixels=15, maxiter=100, popsize=80, verbose=False)
-            adv_list.append(adversarial)
-        adv_img = torch.cat(adv_list, dim=0)
-        return adv_img
+    #        adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1-label.item(), 
+    #            pixels=5, maxiter=50, popsize=30, verbose=False)
+    #        adv_list.append(adversarial)
+    #    adv_img = torch.cat(adv_list, dim=0)
+    #    return adv_img
     else:
         raise AttributeError("Provided attack type not supported")
         return 0
