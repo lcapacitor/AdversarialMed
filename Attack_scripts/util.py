@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import torch
 import torchvision
 import torch.nn as nn
+
+from VAE.vae_conv_patch import VAE
 from torchvision import transforms
 from torch.autograd import Variable
 from torch.autograd.gradcheck import zero_gradients
@@ -75,6 +77,31 @@ def loadChexnet14(checkpoint_path):
         state_dict[new_key] = state_dict[old_key]
         del state_dict[old_key]
 
+    model.load_state_dict(state_dict)
+    return model.eval().to(device)
+
+
+def loadVAEmodel(model_path):
+    filename  = model_path.split('/')[-1].split('.')[0]
+    str_zsize = filename.split('_')[3]
+    str_hdim  = filename.split('_')[-3]
+    str_psize = filename.split('_')[1]
+
+    z_size = int(re.search(r'\d+', str_zsize).group())
+    hidden_dim = int(re.search(r'\d+', str_hdim).group())
+    patch_size = int(re.search(r'\d+', str_psize).group())
+    drop_p = 0.5
+    image_size = 224
+    patch_stride = image_size // patch_size
+    channel_num = 3
+    is_res = True
+    model = VAE(patch_size, channel_num, hidden_dim, z_size, is_res, drop_p)
+
+    # load checkpoint
+    if torch.cuda.is_available():
+        state_dict = torch.load(model_path)
+    else:
+        state_dict = torch.load(model_path, map_location='cpu')
     model.load_state_dict(state_dict)
     return model.eval().to(device)
 
@@ -247,13 +274,14 @@ def generateAdvExamples(model, loss_fn, label_var, inputs, epsilon, num_iters, a
             x_adv.data = x_ori.data + perturbation
         return x_adv.data
 
-    elif attack_type.lower() == 'pixelattack':
+    elif attack_type.lower() == 'pixel':
         # FGSM get adversarial
         adv_list = []
         for _, (input, label) in enumerate(zip(inputs, label_var)):
             # adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1 - label.item(), pixels=20,
             #                               maxiter=200, popsize=50, verbose=False)
-            adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1 - label.item(), pixels=3,maxiter=10, popsize=6, verbose=True)
+            adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1-label.item(), 
+                pixels=15, maxiter=100, popsize=80, verbose=False)
             adv_list.append(adversarial)
         adv_img = torch.cat(adv_list, dim=0)
         return adv_img

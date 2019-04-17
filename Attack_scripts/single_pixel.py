@@ -34,6 +34,8 @@ def predict_classes(xs, img, target_calss, net, minimize=True):
 
 
 def attack_success(x, img, target_class, net, targeted_attack=False, verbose=False):
+    '''
+    '''
     attack_image = perturb_image(x, img.clone())
     input = Variable(attack_image).to(device)
     confidence = F.softmax(net(input)).data.cpu().numpy()[0]
@@ -41,10 +43,13 @@ def attack_success(x, img, target_class, net, targeted_attack=False, verbose=Fal
 
     if (verbose):
         print("Confidence: %.4f" % confidence[target_class])
+
+    '''
     if (targeted_attack and predicted_class == target_class) or (
             not targeted_attack and predicted_class != target_class):
         return True
-
+    '''
+    return False
 
 def attack_max_iter(img_size, img, label, net, target=None, pixels=1, maxiter=75, popsize=400, verbose=False):
     # img: 1*3*W*H tensor

@@ -1,4 +1,5 @@
 import os
+import re
 import cv2
 import copy
 import math
@@ -23,9 +24,11 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import roc_curve, roc_auc_score
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 
-PNEU_PATH = '../models/pneu_model.ckpt'
+PNEU_PATH = '../models/pneu_model_aug.ckpt'
+VAE_PATH = './trained_weights/vae_patch32_fgsm_zdim2048_hdim128_e50_lr0005.torch'
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 mean = [0.485, 0.456, 0.406]
 std  = [0.229, 0.224, 0.225]
@@ -116,11 +119,16 @@ class classifier(nn.Module):
 
 
 def loadVAEmodel(model_path):
-    z_size = 2048
-    hidden_dim = 64
+    filename  = model_path.split('/')[-1].split('.')[0]
+    str_zsize = filename.split('_')[3]
+    str_hdim  = filename.split('_')[-3]
+    str_psize = filename.split('_')[1]
+
+    z_size = int(re.search(r'\d+', str_zsize).group())
+    hidden_dim = int(re.search(r'\d+', str_hdim).group())
+    patch_size = int(re.search(r'\d+', str_psize).group())
     drop_p = 0.5
     image_size = 224
-    patch_size = 32
     patch_stride = image_size // patch_size
     channel_num = 3
     is_res = True
@@ -165,7 +173,7 @@ def trainClassifier(clean_dir, adv_dir, attack_type):
     input_size = 2048
     hidd_size = 2048
     out_size = 1
-    model_path = './trained_weights/vae_patch32_fgsm_zdim2048_hdim64_e50_lr0005.torch'
+    model_path = './trained_weights/vae_patch32_fgsm_zdim2048_hdim128_e50_lr0005.torch'
     data_type = 'clean'
 
     dataset = {x: ImageDataset(clean_dir, adv_dir, attack_type, x, data_type) for x in ['train', 'val']}
@@ -251,19 +259,25 @@ def testVAEDefense(clean_dir, adv_dir, attack_type):
     weight_decay = 1e-5
     batch_size = 20
 
-    model_path = './trained_weights/vae_patch32_fgsm_zdim2048_hdim64_e50_lr0005.torch'
-    data_type = ['clean']
-    setName = 'val'
-    pred_probs_vae = {x: [] for x in data_type}
-    running_corrects_vae = {x: 0 for x in data_type}
-    pred_probs = {x: [] for x in data_type}
-    running_corrects = {x: 0 for x in data_type}
     
+    data_type = ['clean', '{} adv'.format(attack_type)]
+    setName = 'val'
 
+    # Initialize metrics containers
+    pred_probs_vae = {x: [] for x in data_type}
+    pred_ys_vae = {x: [] for x in data_type}
+    running_corrects_vae = {x: 0 for x in data_type}
+
+    pred_probs = {x: [] for x in data_type}
+    pred_ys = {x: [] for x in data_type}
+    running_corrects = {x: 0 for x in data_type}
+
+    # Initialize dataset and dataloder
     datasets    = {x: ImageDataset(clean_dir, adv_dir, attack_type, setName, x) for x in data_type}
     dataloaders = {x: DataLoader(datasets[x], batch_size=batch_size, shuffle=True, num_workers=0) for x in data_type}
 
-    vaeModel = loadVAEmodel(model_path)
+    # Load models
+    vaeModel = loadVAEmodel(VAE_PATH)
     pneuModel = loadPneuModel(PNEU_PATH)
     plt.figure(figsize=(10, 8))
 
@@ -299,12 +313,15 @@ def testVAEDefense(clean_dir, adv_dir, attack_type):
             # Predict with pneuModel
             outputs = pneuModel(inputs)
             _, preds = torch.max(outputs, 1)
+            pred_ys[dt] += preds.tolist()
             pred_probs[dt] += outputs[:, 1].tolist()
+
             running_corrects[dt] += torch.sum(preds.cpu() == labels.data).item()
             
             # Predict with VAErec
             rec_ouputs = pneuModel(rec_inputs.to(device))
             _, rec_preds = torch.max(rec_ouputs, 1)
+            pred_ys_vae[dt] += rec_preds.tolist()
             pred_probs_vae[dt] += rec_ouputs[:, 1].tolist()
             running_corrects_vae[dt] += torch.sum(rec_preds.cpu() == labels.data).item()
 
@@ -314,14 +331,28 @@ def testVAEDefense(clean_dir, adv_dir, attack_type):
         auc = roc_auc_score(gt_labels, pred_probs[dt])
         fpr, tpr, thresholds = roc_curve(gt_labels, pred_probs[dt])
         accuracy = running_corrects[dt] / len(datasets[dt])
-        print('pneuModel on {} data: Accuracy: {:.4f}, AUC: {:.4f}'.format(dt, accuracy, auc))
-        plt.plot(fpr, tpr, '-.', label='pneuModel on {} (auc = {:.4f})'.format(dt, auc))
+
+        recall = recall_score(gt_labels, pred_ys[dt])
+        precision = precision_score(gt_labels, pred_ys[dt])
+        f1 = f1_score(gt_labels, pred_ys[dt])
+
+        print('pneuModel on {} data: Accuracy: {:.4f}, AUC: {:.4f}, Recall: {:.4f}, Precision: {:.4f}, f1: {:.4f}'
+            .format(dt, accuracy, auc, recall, precision, f1))
+        plt.plot(fpr, tpr, '-.', label='pneuModel on {} (auc={:.4f}, acc={:.4f}, f1={:.4f})'
+            .format(dt, auc, accuracy, f1))
 
         auc = roc_auc_score(gt_labels, pred_probs_vae[dt])
         fpr, tpr, thresholds = roc_curve(gt_labels, pred_probs_vae[dt])
         accuracy = running_corrects_vae[dt] / len(datasets[dt])
-        print('VAErec on {} data: Accuracy: {:.4f}, AUC: {:.4f}'.format(dt, accuracy, auc))
-        plt.plot(fpr, tpr, '-.', label='VAErec on {} (auc = {:.4f})'.format(dt, auc))
+
+        recall = recall_score(gt_labels, pred_ys_vae[dt])
+        precision = precision_score(gt_labels, pred_ys_vae[dt])
+        f1 = f1_score(gt_labels, pred_ys_vae[dt])
+
+        print('VAErec on {} data: Accuracy: {:.4f}, AUC: {:.4f}, Recall: {:.4f}, Precision: {:.4f}, f1: {:.4f}'
+            .format(dt, accuracy, auc, recall, precision, f1))
+        plt.plot(fpr, tpr, '-.', label='VAErec on {} (auc={:.4f}, acc={:.4f}), f1={:.4f})'
+            .format(dt, auc, accuracy, f1))
 
     plt.xlabel('fpr')
     plt.ylabel('tpr')

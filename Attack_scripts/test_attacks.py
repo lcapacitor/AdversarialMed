@@ -3,6 +3,7 @@ import util
 import torch
 import argparse
 import torchvision
+import numpy as np
 import torch.nn as nn
 import matplotlib.pyplot as plt
 
@@ -11,10 +12,12 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from sklearn.metrics import roc_curve, roc_auc_score
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 from advertorch.defenses import MedianSmoothing2D
 from advertorch.defenses import BitSqueezing
 from advertorch.defenses import JPEGFilter
+
 
 _to_pil_image = transforms.ToPILImage()
 _to_tensor = transforms.ToTensor()
@@ -22,10 +25,11 @@ _to_tensor = transforms.ToTensor()
 PNEU_PATH = 'models/pneu_model_aug.ckpt'
 PNEU_ADV  = 'models/pneu_adv_model_aug.ckpt'
 CHEX_PATH = 'models/model_14_class.pth.tar'
+VAE_PATH = './VAE/trained_weights/vae_patch32_fgsm_zdim2048_hdim128_e50_lr0005.torch'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE = 20
-IMG_SIZE = 224
+BATCH_SIZE = 10
+
 
 def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
     # Initialize Defense
@@ -50,7 +54,7 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
 
     # Setup data loader
     data_transform = transforms.Compose([
-        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(util.mean, util.std),
     ])
@@ -59,16 +63,18 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
 
     running_corrects = 0
     pred_probs = []
-    gt_labels = []
+    pred_ys    = []
+    gt_labels  = []
 
     # Intialize the error container for attacks
     preds_attacks = {}
     for att in attack_type:
-        preds_attacks[att] = {'pred_probs_adv': [], 'running_corrects_adv':0}
+        preds_attacks[att] = {'pred_ys_adv': [], 'pred_probs_adv': [], 'running_corrects_adv':0}
         # Intialize the error container for defenses
         if defense_type is not None:
             for defs in defense_type:
-                preds_attacks[att][defs] = {'pred_probs_defense':[], 'pred_probs_adv_defense':[],
+                preds_attacks[att][defs] = {'pred_ys_defense':[], 'pred_ys_adv_defense':[],
+                                            'pred_probs_defense':[], 'pred_probs_adv_defense':[],
                                             'running_corrects_defense': 0, 'running_corrects_adv_defense': 0}
 
     for inputs, labels in tqdm(dataloader, desc='test iters', leave=False):
@@ -77,6 +83,7 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
 
         outputs = model(inputs)
         _, preds = torch.max(outputs, 1)
+        pred_ys += preds.tolist()
         pred_probs += outputs[:, 1].tolist()
         gt_labels += labels.tolist()
         running_corrects += torch.sum(preds.cpu() == labels.data).item()
@@ -92,6 +99,7 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
             # Predict with adversarial
             f_ouput = model(adv_img)
             _, f_preds = torch.max(f_ouput, 1)
+            preds_attacks[att]['pred_ys_adv'] += f_preds.tolist()
             preds_attacks[att]['pred_probs_adv'] += f_ouput[:, 1].tolist()
             preds_attacks[att]['running_corrects_adv'] += torch.sum(f_preds.cpu() == labels.data).item()
 
@@ -124,17 +132,41 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
                         defense_input = inputs
                         defense_adv = adv_img
 
+                    elif defs.lower() == "vae":
+                        model_defs = util.loadPneuModel(PNEU_ADV)
+                        vaeModel = util.loadVAEmodel(VAE_PATH)
+                        defense_input = inputs
+                        defense_adv = torch.zeros((adv_img.shape)).to(device)
+                        # reconstruct input from parts
+                        for j in range(7):
+                            for i in range(7):
+                                row_s = 32 * j
+                                row_e = row_s + 32
+                                col_s = 32 * i
+                                col_e = col_s + 32
+
+                                _, rec_parts = vaeModel(adv_img[:,:,row_s:row_e,col_s:col_e])
+                                defense_adv[:,:,row_s:row_e,col_s:col_e] = rec_parts
+                        # Show rec images
+                        #rec = defense_adv[0].data.cpu().numpy()
+                        #rec = np.transpose(rec, (1,2,0))
+                        #rec = np.clip(rec, 0, 1)
+                        #plt.imshow(rec)
+                        #plt.show()
+
                     else:
                         raise AttributeError("Provided defense type not supported")
 
                     # Predict with defensed images
                     defense_outputs = model_defs(defense_input)
                     _, defense_preds = torch.max(defense_outputs, 1)
+                    preds_attacks[att][defs]['pred_ys_defense'] += defense_preds.tolist()
                     preds_attacks[att][defs]['pred_probs_defense'] += defense_outputs[:, 1].tolist()
                     preds_attacks[att][defs]['running_corrects_defense'] += torch.sum(defense_preds.cpu() == labels.data).item()
 
                     f_ouput_defense = model_defs(defense_adv)
                     _, f_preds_defense = torch.max(f_ouput_defense, 1)
+                    preds_attacks[att][defs]['pred_ys_adv_defense'] += f_preds_defense.tolist()
                     preds_attacks[att][defs]['pred_probs_adv_defense'] += f_ouput_defense[:, 1].tolist()
                     preds_attacks[att][defs]['running_corrects_adv_defense'] += torch.sum(f_preds_defense.cpu() == labels.data).item()
 
@@ -145,17 +177,28 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
     auc = roc_auc_score(gt_labels, pred_probs)
     fpr, tpr, thresholds = roc_curve(gt_labels, pred_probs)
     accuracy = running_corrects / len(image_dataset)
-    print('Clean Examples: Accuracy: {:.4f}, AUC: {:.4f}'.format(accuracy, auc))
+    recall = recall_score(gt_labels, pred_ys)
+    precision = precision_score(gt_labels, pred_ys)
+    f1 = f1_score(gt_labels, pred_ys)
+    print('Clean Examples: Accuracy: {:.4f}, AUC: {:.4f}, Recall: {:.4f}, Precision: {:.4f}, f1: {:.4f}'
+        .format(accuracy, auc, recall, precision, f1))
     plt.figure(figsize=(10, 8))
-    plt.plot(fpr, tpr, '-.', label='clean (auc = {:.4f})'.format(auc))
+    plt.plot(fpr, tpr, '-.', label='clean (auc={:.4f}, acc={:.4f}, f1={:.4f})'.format(auc, accuracy, f1))
 
     # compute metrices on adv with all attacks and plot roc-auc
     for att in attack_type:
         auc_adv = roc_auc_score(gt_labels, preds_attacks[att]['pred_probs_adv'])
         fpr_adv, tpr_adv, thresholds_adv = roc_curve(gt_labels, preds_attacks[att]['pred_probs_adv'])
         accuracy_adv = preds_attacks[att]['running_corrects_adv'] / len(image_dataset)
-        print('{} Adversarial Examples: Accuracy: {:.4f}, AUC: {:.4f}'.format(att, accuracy_adv, auc_adv))
-        plt.plot(fpr_adv, tpr_adv, '-.', label='{} adversarial (auc = {:.4f})'.format(att, auc_adv))
+
+        recall_adv = recall_score(gt_labels, preds_attacks[att]['pred_ys_adv'])
+        precision_adv = precision_score(gt_labels, preds_attacks[att]['pred_ys_adv'])
+        f1_adv = f1_score(gt_labels, preds_attacks[att]['pred_ys_adv'])
+
+        print('{} Adversarial Examples: Accuracy: {:.4f}, AUC: {:.4f}, Recall: {:.4f}, Precision: {:.4f}, f1: {:.4f}'
+            .format(att, accuracy_adv, auc_adv, recall_adv, precision_adv, f1_adv))
+        plt.plot(fpr_adv, tpr_adv, '-.', label='att: {} (auc={:.4f}, acc={:.4f}, f1={:.4f})'
+            .format(att, auc_adv, accuracy_adv, f1_adv))
 
         if defense_type is not None:
             for defs in defense_type:
@@ -168,13 +211,23 @@ def testPerformance(attack_type, epsilon, data_path, model_type, defense_type):
                 accuracy_defense = preds_attacks[att][defs]['running_corrects_defense'] / len(image_dataset)
                 accuracy_adv_defense = preds_attacks[att][defs]['running_corrects_adv_defense'] / len(image_dataset)
 
-                print('{} defense on Clean Examples: Accuracy: {:.4f}, AUC: {:.4f}'.format(defs, accuracy_defense, auc_defense))
-                print('{} defense on Adversarial Examples: Accuracy: {:.4f}, AUC: {:.4f}'.format(defs, accuracy_adv_defense,
-                                                                                              auc_adv_defense))
+                recall_def = recall_score(gt_labels, preds_attacks[att][defs]['pred_ys_defense'])
+                precision_def = precision_score(gt_labels, preds_attacks[att][defs]['pred_ys_defense'])
+                f1_def = f1_score(gt_labels, preds_attacks[att][defs]['pred_ys_defense'])
 
-                plt.plot(fpr_defense, tpr_defense, '-.', label='{} defense on clean (auc = {:.4f})'.format(defs, auc_defense))
-                plt.plot(fpr_adv_defense, tpr_adv_defense, '-.',
-                         label='{} defense on {} adversarial (auc = {:.4f})'.format(defs, att, auc_adv_defense))
+                recall_adv_def = recall_score(gt_labels, preds_attacks[att][defs]['pred_ys_adv_defense'])
+                precision_adv_def = precision_score(gt_labels, preds_attacks[att][defs]['pred_ys_adv_defense'])
+                f1_adv_def = f1_score(gt_labels, preds_attacks[att][defs]['pred_ys_adv_defense'])
+
+                print('{} defense on Clean Examples: Accuracy: {:.4f}, AUC: {:.4f}, Recall: {:.4f}, Precision: {:.4f}, f1: {:.4f}'
+                    .format(defs, accuracy_defense, auc_defense, recall_def, precision_def, f1_def))
+                print('{} defense on Adversarial Examples: Accuracy: {:.4f}, AUC: {:.4f}, Recall: {:.4f}, Precision: {:.4f}, f1: {:.4f}'
+                    .format(defs, accuracy_adv_defense, auc_adv_defense, recall_adv_def, precision_adv_def, f1_adv_def))
+
+                plt.plot(fpr_defense, tpr_defense, '-.', label='def: {} on clean (auc={:.4f}, acc={:.4f}, f1={:.4f})'
+                    .format(defs, auc_defense, accuracy_defense, f1_def))
+                plt.plot(fpr_adv_defense, tpr_adv_defense, '-.',label='def: {} on {} (auc={:.4f}, acc={:.4f}), f1={:.4f})'
+                    .format(defs, att, auc_adv_defense, accuracy_adv_defense, f1_adv_def))
 
     plt.xlabel('fpr')
     plt.ylabel('tpr')
@@ -195,7 +248,7 @@ if __name__ == '__main__':
     import warnings
     warnings.filterwarnings("ignore")
     parser = argparse.ArgumentParser()
-    parser.add_argument('--attack', type=str, nargs='+', required=True, help='specify which attack to use: fgsm and/or b_iter/pixelattack, default is fgsm')
+    parser.add_argument('--attack', type=str, nargs='+', required=True, help='specify which attack to use: fgsm, b_iter, pixel, default is fgsm')
     parser.add_argument('--epsilon', type=float, default=0.02, help='a float value of epsilon, default is 0.02')
     parser.add_argument('--path', type=str, required=True, help='Path to the test images')
     parser.add_argument('--model', type=str, default='pneu',
