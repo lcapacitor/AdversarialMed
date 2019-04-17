@@ -19,8 +19,8 @@ from sklearn.metrics import confusion_matrix
 CKPT_PATH = 'model_14_class.pth.tar'
 N_CLASSES = 2
 CLASS_NAMES = ['Pneumonia']
-DATA_DIR = './chex_pneu_data/'
-BATCH_SIZE = 20
+DATA_DIR = './chex_pneu_data_aug/'
+BATCH_SIZE = 10
 
 
 def trained_chexnet(checkpoint_path):
@@ -86,7 +86,7 @@ def train():
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
+            #transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ]),
@@ -98,8 +98,8 @@ def train():
         ]),
     }
     image_datasets = {x: datasets.ImageFolder(os.path.join(DATA_DIR, x), data_transforms[x]) for x in ['train', 'val']}
-    dataloaders = {'train': torch.utils.data.DataLoader(image_datasets['train'], batch_size=BATCH_SIZE, shuffle=True, num_workers=0),
-                   'val':   torch.utils.data.DataLoader(image_datasets['val'], batch_size=BATCH_SIZE, shuffle=False, num_workers=0)}
+    dataloaders = {'train': torch.utils.data.DataLoader(image_datasets['train'], batch_size=BATCH_SIZE, shuffle=True, num_workers=2),
+                   'val':   torch.utils.data.DataLoader(image_datasets['val'], batch_size=BATCH_SIZE, shuffle=False, num_workers=2)}
     dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
 
     #loss_fn = nn.BCELoss()
@@ -150,7 +150,7 @@ def train():
                 # forward
                 # track history if only in train
                 # with torch.set_grad_enabled(phase == 'train'):
-            	# Clean training and clean loss
+                # Clean training and clean loss
                 outputs = model(inputs)
                 _, preds = torch.max(outputs, 1)
                 loss_clean = loss_fn(outputs, labels)
@@ -163,7 +163,7 @@ def train():
                 adv_exams = adv_exams.to(device)
                 outputs_adv = model(adv_exams)
                 _, preds_adv = torch.max(outputs_adv, 1)
-                loss_adv = loss_fn(outputs_adv, preds.to(device))	# train adv with predicted label to prevent label leaking
+                loss_adv = loss_fn(outputs_adv, preds.to(device))   # train adv with predicted label to prevent label leaking
 
                 # total loss
                 loss = alpha * loss_clean + (1 - alpha) * loss_adv
@@ -205,7 +205,7 @@ def train():
     print('Best val loss: {:.4f}\nBest C:{}\nBest C_adv:{}'.format(best_loss, best_C, best_C_adv))
 
     # save best model weights
-    torch.save(best_model_wts, 'pneu_adv_model.ckpt')
+    torch.save(best_model_wts, 'pneu_adv_model_aug.ckpt')
 
 
 if __name__ == '__main__':

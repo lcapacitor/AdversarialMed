@@ -9,7 +9,7 @@ from torch.autograd import Variable
 from torch.autograd.gradcheck import zero_gradients
 
 
-CKPT_PATH = 'models/pneu_model.ckpt'
+CKPT_PATH = 'models/pneu_model_aug.ckpt'
 IMG_PATH_NORM = './img/0/'
 IMG_PATH_PNEU = './img/1/'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']

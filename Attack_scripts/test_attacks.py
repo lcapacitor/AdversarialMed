@@ -20,8 +20,8 @@ from advertorch.defenses import JPEGFilter
 _to_pil_image = transforms.ToPILImage()
 _to_tensor = transforms.ToTensor()
 
-PNEU_PATH = 'models/pneu_model.ckpt'
-PNEU_ADV  = 'models/pneu_adv_model.ckpt'
+PNEU_PATH = 'models/pneu_model_aug.ckpt'
+PNEU_ADV  = 'models/pneu_adv_model_aug.ckpt'
 CHEX_PATH = 'models/model_14_class.pth.tar'
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
