@@ -1,7 +1,7 @@
 import os
 import re
 import cv2
-import foolbox
+import pgd
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -14,7 +14,8 @@ from torchvision import transforms
 from torch.autograd import Variable
 from torch.autograd.gradcheck import zero_gradients
 from single_pixel import attack_max_iter
-from advertorch.attacks import LinfPGDAttack, LocalSearchAttack, SinglePixelAttack, MomentumIterativeAttack
+from advertorch.attacks import LinfPGDAttack, LocalSearchAttack, LBFGSAttack
+from advertorch.attacks import SinglePixelAttack, MomentumIterativeAttack, GradientSignAttack
 
 
 BI_ClASS_NAMES = ['Normal', 'Pneumonia']
@@ -222,7 +223,7 @@ def plotFigures(oriImg, preds, ori_score, advImg, f_preds, f_score, x_grad, epsi
     x_grad = np.clip(x_grad, 0, 1)
 
     # Plot images
-    figure, ax = plt.subplots(1,3, figsize=(18,8))
+    figure, ax = plt.subplots(1,3, figsize=(18,7))
     ax[0].imshow(x)
     ax[0].set_title('Clean Example', fontsize=20)
 
@@ -239,19 +240,27 @@ def plotFigures(oriImg, preds, ori_score, advImg, f_preds, f_score, x_grad, epsi
     ax[0].axis('off')
     ax[2].axis('off')
 
-    ax[0].text(1.1,0.5, "+{}*".format(round(epsilon,3)), size=15, ha="center",
+    ax[0].text(1.1,0.5, "+{} ".format(round(epsilon,3))+r"$\times$", size=15, ha="center",
              transform=ax[0].transAxes)
+    #ax[0].text(1.1,-0.13, r"$\epsilon$", size=15, ha="center", transform=ax[0].transAxes)
 
-    ax[0].text(0.5,-0.13, "Prediction: {}\n Probability: {:.4f}".format(BI_ClASS_NAMES[preds], np.max(ori_score)), size=15, ha="center", transform=ax[0].transAxes)
+    ax[0].text(0.5,-0.22, r'$\mathbf{x}$'+'\nPrediction: {} \nConfidence: {:.2f}%'
+        .format(BI_ClASS_NAMES[preds], np.max(ori_score)*100), size=15, ha="center", transform=ax[0].transAxes)
 
     ax[1].text(1.1,0.5, " = ", size=15, ha="center", transform=ax[1].transAxes)
+    ax[1].text(0.5,-0.13, r"sign($\nabla_\mathbf{x}\ J(\theta, \mathbf{x}, y))$", size=15, ha="center", transform=ax[1].transAxes)
 
-    ax[2].text(0.5,-0.13, "Prediction: {}\n Probability: {:.4f}".format(BI_ClASS_NAMES[f_preds], np.max(f_score)), size=15, ha="center", transform=ax[2].transAxes)
+    ax[2].text(0.5,-0.22, r"$\mathbf{x}+$"+r"$\epsilon$"+r"sign$(\nabla_\mathbf{x}\ J(\theta, \mathbf{x}, y))$"+"\nPrediction: {} \nConfidence: {:.2f}%"
+        .format(BI_ClASS_NAMES[f_preds], np.max(f_score)*100), size=15, ha="center", transform=ax[2].transAxes)
 
+    plt.tight_layout()
     plt.show()
 
 
 def generateAdvExamples(model, loss_fn, label_var, inputs, epsilon, num_iters, alpha, attack_type):
+    low = inputs.min().item() - epsilon
+    up  = inputs.max().item() + epsilon
+
     if attack_type.lower() == 'fgsm':
         # FGSM get adversarial
         x_grad = torch.sign(inputs.grad.data)
@@ -277,37 +286,61 @@ def generateAdvExamples(model, loss_fn, label_var, inputs, epsilon, num_iters, a
             x_adv.data = x_ori.data + perturbation
         return x_adv.data
 
-    elif attack_type.lower() == 'pgd':
-        adversary = LinfPGDAttack(model, loss_fn=nn.CrossEntropyLoss(), eps=0.3, nb_iter=40,
-                                  eps_iter=0.01, rand_init=True, clip_min=0.0, clip_max=1.0, targeted=False)
+    elif attack_type.lower() == 'adv_fgsm':
+        adversary = GradientSignAttack(model, loss_fn=nn.CrossEntropyLoss(), eps=epsilon, 
+            clip_min=low, clip_max=up, targeted=False)
         x_adv = adversary.perturb(inputs, label_var)
         return x_adv
 
+    elif attack_type.lower() == 'lbfgs':
+        adversary = LBFGSAttack(model, num_classes=2, batch_size=1,
+                 binary_search_steps=10, max_iterations=1000,
+                 initial_const=1e-2, clip_min=low, clip_max=up, 
+                 loss_fn=nn.CrossEntropyLoss(), targeted=False)
+        x_adv = adversary.perturb(inputs, label_var)
+        return x_adv
+
+    elif attack_type.lower() == 'pgd':
+        adversary = LinfPGDAttack(model, loss_fn=nn.CrossEntropyLoss(), eps=epsilon, nb_iter=num_iters,
+                                  eps_iter=alpha, rand_init=True, clip_min=low, clip_max=up, targeted=False)
+        x_adv = adversary.perturb(inputs, label_var)
+        return x_adv
+
+    elif attack_type.lower() == 'spgd':
+        adversary = pgd.AttackPGD(model, loss_fn=nn.CrossEntropyLoss(), rand_init=True, 
+                                  eps=epsilon, num_steps=num_iters, step_size=alpha)
+        x_adv = adversary(inputs, label_var)
+        return x_adv
+
     elif attack_type.lower() == 'mi-fgsm':
-        adversary = MomentumIterativeAttack(model, loss_fn=nn.CrossEntropyLoss())
+        adversary = MomentumIterativeAttack(model, loss_fn=nn.CrossEntropyLoss(), 
+            eps=epsilon, nb_iter=num_iters, eps_iter=0.005, clip_min=low, clip_max=up)
         x_adv = adversary.perturb(inputs, label_var)
         return x_adv
 
     elif attack_type.lower() == 'local':
-        adversary = LocalSearchAttack(model)
+        adversary = LocalSearchAttack(model.to(torch.device("cpu")), clip_min=0., clip_max=1., p=1., r=0.5,
+                 loss_fn=nn.CrossEntropyLoss(), d=2, t=2, k=1, round_ub=3, seed_ratio=0.1,
+                 max_nb_seeds=128, comply_with_foolbox=False, targeted=False)
         x_adv = adversary.perturb(inputs, label_var)
         return x_adv
 
     elif attack_type.lower() == 'pixel':
-        adversary = SinglePixelAttack(model)
+        adversary = SinglePixelAttack(model, max_pixels=224, loss_fn=nn.CrossEntropyLoss(), 
+                                      clip_min=low, clip_max=up)
         x_adv = adversary.perturb(inputs, label_var)
         return x_adv
 
-    #elif attack_type.lower() == 'pixel':
-    #    adv_list = []
-    #    for _, (input, label) in enumerate(zip(inputs, label_var)):
+    elif attack_type.lower() == 'spixel':
+        adv_list = []
+        for _, (input, label) in enumerate(zip(inputs, label_var)):
             # adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1 - label.item(), pixels=20,
             #                               maxiter=200, popsize=50, verbose=False)
-    #        adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1-label.item(), 
-    #            pixels=5, maxiter=50, popsize=30, verbose=False)
-    #        adv_list.append(adversarial)
-    #    adv_img = torch.cat(adv_list, dim=0)
-    #    return adv_img
+            adversarial = attack_max_iter(IMG_SIZE, input, label, model, target=1-label.item(), 
+                pixels=50, maxiter=100, popsize=300, verbose=True)
+            adv_list.append(adversarial)
+        adv_img = torch.cat(adv_list, dim=0)
+        return adv_img
     else:
         raise AttributeError("Provided attack type not supported")
         return 0

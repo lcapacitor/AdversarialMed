@@ -70,7 +70,7 @@ class ImageDataset(Dataset):
 		return len(self.ori_fileList)
 
 	def __getitem__(self, index):
-		x = imgProc(self.adv_fileList[index], is_target=False)
+		x = imgProc(self.adv_fileList[index], is_target=True)
 		y = imgProc(self.ori_fileList[index], is_target=True)
 		# Assertions
 		_adv = '_'.join(self.adv_fileList[index].split('/')[-1].split('_')[1:])
@@ -86,7 +86,7 @@ def visualResults(adv_img, rec_img, tar_img, epoch):
 	assert adv_img.shape == rec_img.shape
 	assert rec_img.shape == tar_img.shape
 	adv = adv_img.data.cpu()
-	adv = adv.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
+	#adv = adv.mul(torch.FloatTensor(std).view(3, 1, 1)).add(torch.FloatTensor(mean).view(3,1,1)).detach().numpy()
 	adv = np.transpose(adv, (1,2,0))   # C X H X W  ==>   H X W X C
 	adv = np.clip(adv, 0, 1)
 
@@ -131,8 +131,8 @@ def train(clean_dir, adv_dir, attack_type):
 	warnings.filterwarnings("ignore")
 
 	# Setup Model hyer-param
-	z_size = 1024
-	hidden_dim = 32
+	z_size = 2048
+	hidden_dim = 64
 	drop_p = 0.5
 	image_size = 224
 	channel_num = 3
@@ -142,7 +142,8 @@ def train(clean_dir, adv_dir, attack_type):
 	lr = 1e-3
 	weight_decay = 1e-5
 	batch_size = 64
-	num_epochs = 20
+	num_epochs = 50
+	beta = 1
 	visual_interval = 2
 	best_loss = math.inf
 	loss_record = {'train': {'total_loss': [], 'rec_loss':[], 'kl_loss':[]},
@@ -164,10 +165,17 @@ def train(clean_dir, adv_dir, attack_type):
 	print ('Start training on {}...'.format(device))
 	since = time.time()
 
+	counter = 0
 	for epoch in range(num_epochs):
 		print('\nEpoch {}/{}, lr: {}, wd: {}'.format(epoch + 1, num_epochs,
 			  optimizer.param_groups[0]['lr'], weight_decay))
 		print('-' * 30)
+
+		# early stop counter
+		if optimizer.param_groups[0]['lr'] < 1e-6:
+			counter += 1
+		if counter >= 5:
+			break
 
 		for phase in ['train', 'val']:
 			if phase == 'train':
@@ -188,7 +196,7 @@ def train(clean_dir, adv_dir, attack_type):
 					(mean, logvar), reconstructed = model(inputs)
 					rec_loss = model.reconstruction_loss(reconstructed, targets)
 					kl_loss = model.kl_divergence_loss(mean, logvar)
-					total_loss = rec_loss + kl_loss
+					total_loss = rec_loss + beta * kl_loss
 
                     # backward + optimize only if in training phase
 					if phase == 'train':

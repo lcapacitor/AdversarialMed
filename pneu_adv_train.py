@@ -2,8 +2,10 @@ import os
 import re
 import copy
 import time
+import util
 import numpy as np
 import torch
+import argparse
 import torchvision
 import torch.nn as nn
 import torch.optim as optim
@@ -16,11 +18,11 @@ from torchvision import datasets, transforms
 from sklearn.metrics import confusion_matrix
 
 
-CKPT_PATH = 'model_14_class.pth.tar'
+CKPT_PATH = './Attack_scripts/models/model_14_class.pth.tar'
 N_CLASSES = 2
 CLASS_NAMES = ['Pneumonia']
-DATA_DIR = './chex_pneu_data_aug/'
-BATCH_SIZE = 10
+DATA_DIR = '../../chex_pneu_data_aug/'
+BATCH_SIZE = 20
 
 
 def trained_chexnet(checkpoint_path):
@@ -64,7 +66,7 @@ def trained_chexnet(checkpoint_path):
     return model
 
 
-def train():
+def train(attack_type):
 
     num_epochs = 20
     lr = 0.0001
@@ -72,8 +74,7 @@ def train():
     nnIsTrained = True
 
     # Adv training params
-    epsilon = 0.02
-    alpha = 0.5
+    alp = 0.7
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = trained_chexnet(CKPT_PATH)
@@ -86,7 +87,7 @@ def train():
     data_transforms = {
         'train': transforms.Compose([
             transforms.RandomResizedCrop(224),
-            #transforms.RandomHorizontalFlip(),
+            transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ]),
@@ -107,7 +108,7 @@ def train():
     # define the optimizer
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), weight_decay=weight_decay)
     # define lr_scheduler: if the loss is not improved for 3 epoch, then reduce lr by 2
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=3, threshold=0.0001)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=4, threshold=0.0001)
 
     print ("train_model(): Start training...")
     since = time.time() # timing
@@ -150,23 +151,24 @@ def train():
                 # forward
                 # track history if only in train
                 # with torch.set_grad_enabled(phase == 'train'):
-                # Clean training and clean loss
+            	# Clean training and clean loss
                 outputs = model(inputs)
                 _, preds = torch.max(outputs, 1)
                 loss_clean = loss_fn(outputs, labels)
 
                 # Adv training and adv loss with FGSM
                 loss_clean.backward(retain_graph=True)
-                x_grad = torch.sign(inputs.grad.cpu().data)
-                perturbation = epsilon * x_grad
-                adv_exams = inputs.cpu().data + perturbation
-                adv_exams = adv_exams.to(device)
-                outputs_adv = model(adv_exams)
-                _, preds_adv = torch.max(outputs_adv, 1)
-                loss_adv = loss_fn(outputs_adv, preds.to(device))   # train adv with predicted label to prevent label leaking
+
+                loss_adv = []
+                for att in attack_type:
+                    adv_exams = util.generateAdvExamples(model, loss_fn, labels, inputs, epsilon=0.02, num_iters=10, alpha=0.005, attack_type=att)
+                    outputs_adv = model(adv_exams)
+                    _, preds_adv = torch.max(outputs_adv, 1)
+                    loss_adv.append(loss_fn(outputs_adv, preds.to(device)))	# train adv with predicted label to prevent label leaking
+                loss_adv_mean = torch.mean(torch.stack(loss_adv))
 
                 # total loss
-                loss = alpha * loss_clean + (1 - alpha) * loss_adv
+                loss = alp * loss_clean + (1 - alp) * loss_adv_mean
 
                 # backward + optimize only if in training phase
                 if phase == 'train':
@@ -198,6 +200,11 @@ def train():
                 best_C_adv = C_adv
                 print (C)
                 print (C_adv)
+            # save checkpoints
+            if phase == 'val' and (epoch+1) % 5 == 0 and epoch > 0:
+                ckpt_model = copy.deepcopy(model.state_dict())
+                torch.save(best_model_wts, './models/checkpoints/pneu_adv_model_{}_{}_e{}.ckpt'
+                    .format('_'.join(attack_type), alp, epoch+1))
 
     # Finish training, printing out results
     time_elapsed = time.time() - since
@@ -205,8 +212,16 @@ def train():
     print('Best val loss: {:.4f}\nBest C:{}\nBest C_adv:{}'.format(best_loss, best_C, best_C_adv))
 
     # save best model weights
-    torch.save(best_model_wts, 'pneu_adv_model_aug.ckpt')
+    torch.save(best_model_wts, './models/pneu_adv_model_{}_{}.ckpt'.format('_'.join(attack_type), alp))
 
+
+def main(args):
+    attack_type = args.attack
+    train(attack_type)
 
 if __name__ == '__main__':
-    train()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--attack', type=str, nargs='+', required=True, 
+        help='specify which attack to use: fgsm, i-fgsm, pgd, pixel, mi-fgsm')
+    args = parser.parse_args()
+    main(args)

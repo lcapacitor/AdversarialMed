@@ -1,7 +1,7 @@
 from util import *
 import torch.nn.functional as F
-from differential_evolution import differential_evolution
-# from scipy.optimize import differential_evolution
+#from differential_evolution import differential_evolution
+from scipy.optimize import differential_evolution
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def perturb_image(xs, img):
@@ -34,22 +34,19 @@ def predict_classes(xs, img, target_calss, net, minimize=True):
 
 
 def attack_success(x, img, target_class, net, targeted_attack=False, verbose=False):
-    '''
-    '''
+
+    threshold = 0.6
     attack_image = perturb_image(x, img.clone())
     input = Variable(attack_image).to(device)
-    confidence = F.softmax(net(input)).data.cpu().numpy()[0]
+    confidence = net(input).data.cpu().numpy()[0]
     predicted_class = np.argmax(confidence)
 
     if (verbose):
         print("Confidence: %.4f" % confidence[target_class])
-
-    '''
-    if (targeted_attack and predicted_class == target_class) or (
-            not targeted_attack and predicted_class != target_class):
+    if (targeted_attack and predicted_class == target_class and confidence[predicted_class] >= threshold) or (
+            not targeted_attack and predicted_class != target_class  and confidence[predicted_class] >= threshold):
         return True
-    '''
-    return False
+
 
 def attack_max_iter(img_size, img, label, net, target=None, pixels=1, maxiter=75, popsize=400, verbose=False):
     # img: 1*3*W*H tensor
