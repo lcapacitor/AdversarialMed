@@ -15,8 +15,8 @@ We would suggest all practitioners in the machine learning for health community 
 
 # Authors
 
-  - Yan (Leo) Li, Department of Electrical and Computer Engineering
-  - Yuyang (Nathan) Liu, Department of Computer Science
+  - Yan (Leo) Li, Department of Electrical and Computer Engineering, University of Toronto
+  - Yuyang (Nathan) Liu, Department of Computer Science, University of Toronto
 
 License
 ----
